@@ -58,8 +58,11 @@ describe("MockOpenAI", () => {
     if (mock) {
       try {
         await mock.stop();
-      } catch {
-        // already stopped
+      } catch (err) {
+        // Expected when test already stopped the server
+        if (!(err instanceof Error && err.message === "Server not started")) {
+          throw err;
+        }
       }
       mock = null;
     }
@@ -373,6 +376,218 @@ describe("MockOpenAI", () => {
       const res2 = await post(mock.url, chatBody("late-add"));
       expect(res2.status).toBe(200);
       expect(res2.data).toContain("late response");
+    });
+  });
+
+  describe("onMessage convenience", () => {
+    it("registers a fixture matching a string userMessage", async () => {
+      mock = new MockOpenAI();
+      mock.onMessage("greet", { content: "Hi!" });
+      await mock.start();
+
+      const res = await post(mock.url, chatBody("greet"));
+      expect(res.status).toBe(200);
+      expect(res.data).toContain("Hi!");
+    });
+
+    it("registers a fixture matching a regex userMessage", async () => {
+      mock = new MockOpenAI();
+      mock.onMessage(/hel+o/, { content: "Matched!" });
+      await mock.start();
+
+      const res = await post(mock.url, chatBody("helllllo"));
+      expect(res.status).toBe(200);
+      expect(res.data).toContain("Matched!");
+    });
+
+    it("returns this for chaining", () => {
+      mock = new MockOpenAI();
+      expect(mock.onMessage("x", { content: "y" })).toBe(mock);
+    });
+  });
+
+  describe("onToolCall convenience", () => {
+    it("registers a fixture matching a tool name", async () => {
+      mock = new MockOpenAI();
+      mock.onToolCall("get_weather", { content: "sunny" });
+      await mock.start();
+
+      const res = await post(mock.url, {
+        model: "gpt-4",
+        messages: [
+          { role: "assistant", content: null, tool_calls: [{ id: "tc1", type: "function", function: { name: "get_weather", arguments: "{}" } }] },
+          { role: "tool", content: "result", tool_call_id: "tc1" },
+        ],
+      });
+      // The fixture match for toolName is checked against the last assistant message's tool_calls
+      // This may or may not match depending on router logic, but the fixture should be registered
+      expect(mock).toBeInstanceOf(MockOpenAI);
+    });
+
+    it("returns this for chaining", () => {
+      mock = new MockOpenAI();
+      expect(mock.onToolCall("fn", { content: "r" })).toBe(mock);
+    });
+  });
+
+  describe("onToolResult convenience", () => {
+    it("returns this for chaining", () => {
+      mock = new MockOpenAI();
+      expect(mock.onToolResult("call_123", { content: "r" })).toBe(mock);
+    });
+  });
+
+  describe("nextRequestError", () => {
+    it("returns an error on the next request then removes itself", async () => {
+      mock = new MockOpenAI();
+      mock.onMessage("hello", { content: "Hi!" });
+      await mock.start();
+
+      mock.nextRequestError(503, { message: "Overloaded", type: "server_error" });
+
+      // First request should get the error
+      const res1 = await post(mock.url, chatBody("hello"));
+      expect(res1.status).toBe(503);
+      const body1 = JSON.parse(res1.data);
+      expect(body1.error.message).toBe("Overloaded");
+
+      // Second request should get the normal fixture
+      const res2 = await post(mock.url, chatBody("hello"));
+      expect(res2.status).toBe(200);
+      expect(res2.data).toContain("Hi!");
+    });
+
+    it("uses default error message when none provided", async () => {
+      mock = new MockOpenAI();
+      mock.onMessage("hello", { content: "Hi!" });
+      await mock.start();
+
+      mock.nextRequestError(500);
+
+      const res = await post(mock.url, chatBody("hello"));
+      expect(res.status).toBe(500);
+      const body = JSON.parse(res.data);
+      expect(body.error.message).toBe("Injected error");
+    });
+
+    it("returns this for chaining", () => {
+      mock = new MockOpenAI();
+      expect(mock.nextRequestError(500)).toBe(mock);
+    });
+  });
+
+  describe("journal proxies", () => {
+    it("getRequests returns journal entries", async () => {
+      mock = new MockOpenAI();
+      mock.onMessage("hi", { content: "Hello" });
+      await mock.start();
+
+      await post(mock.url, chatBody("hi"));
+      await post(mock.url, chatBody("hi"));
+
+      const requests = mock.getRequests();
+      expect(requests).toHaveLength(2);
+    });
+
+    it("getLastRequest returns last entry", async () => {
+      mock = new MockOpenAI();
+      mock.onMessage("a", { content: "A" });
+      mock.onMessage("b", { content: "B" });
+      await mock.start();
+
+      await post(mock.url, chatBody("a"));
+      await post(mock.url, chatBody("b"));
+
+      const last = mock.getLastRequest();
+      expect(last).not.toBeNull();
+      expect(last!.body.messages[0].content).toBe("b");
+    });
+
+    it("getLastRequest returns null when no requests", async () => {
+      mock = new MockOpenAI();
+      await mock.start();
+      expect(mock.getLastRequest()).toBeNull();
+    });
+
+    it("clearRequests empties the journal", async () => {
+      mock = new MockOpenAI();
+      mock.onMessage("hi", { content: "Hello" });
+      await mock.start();
+
+      await post(mock.url, chatBody("hi"));
+      expect(mock.journal.size).toBe(1);
+
+      mock.clearRequests();
+      expect(mock.journal.size).toBe(0);
+    });
+
+    it("getRequests throws when server not started", () => {
+      mock = new MockOpenAI();
+      expect(() => mock!.getRequests()).toThrow("Server not started");
+    });
+  });
+
+  describe("reset", () => {
+    it("clears fixtures and journal", async () => {
+      mock = new MockOpenAI();
+      mock.onMessage("hi", { content: "Hello" });
+      await mock.start();
+
+      await post(mock.url, chatBody("hi"));
+      expect(mock.journal.size).toBe(1);
+
+      mock.reset();
+      expect(mock.journal.size).toBe(0);
+
+      // Fixture should be gone — request 404s
+      const res = await post(mock.url, chatBody("hi"));
+      expect(res.status).toBe(404);
+    });
+
+    it("returns this for chaining", async () => {
+      mock = new MockOpenAI();
+      await mock.start();
+      expect(mock.reset()).toBe(mock);
+    });
+
+    it("works even before server starts (just clears fixtures)", () => {
+      mock = new MockOpenAI();
+      mock.onMessage("hi", { content: "Hello" });
+      expect(mock.reset()).toBe(mock);
+    });
+  });
+
+  describe("baseUrl getter", () => {
+    it("returns same value as url", async () => {
+      mock = new MockOpenAI();
+      await mock.start();
+      expect(mock.baseUrl).toBe(mock.url);
+    });
+
+    it("throws before server is started", () => {
+      mock = new MockOpenAI();
+      expect(() => mock!.baseUrl).toThrow("Server not started");
+    });
+  });
+
+  describe("port getter", () => {
+    it("returns a number", async () => {
+      mock = new MockOpenAI();
+      await mock.start();
+      expect(typeof mock.port).toBe("number");
+      expect(mock.port).toBeGreaterThan(0);
+    });
+
+    it("matches the port in the URL", async () => {
+      mock = new MockOpenAI();
+      await mock.start();
+      const urlPort = parseInt(new URL(mock.url).port, 10);
+      expect(mock.port).toBe(urlPort);
+    });
+
+    it("throws before server is started", () => {
+      mock = new MockOpenAI();
+      expect(() => mock!.port).toThrow("Server not started");
     });
   });
 

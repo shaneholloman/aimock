@@ -55,6 +55,92 @@ export class MockOpenAI {
     });
   }
 
+  onMessage(
+    pattern: string | RegExp,
+    response: FixtureResponse,
+    opts?: { latency?: number; chunkSize?: number },
+  ): this {
+    return this.on({ userMessage: pattern }, response, opts);
+  }
+
+  onToolCall(
+    name: string,
+    response: FixtureResponse,
+    opts?: { latency?: number; chunkSize?: number },
+  ): this {
+    return this.on({ toolName: name }, response, opts);
+  }
+
+  onToolResult(
+    id: string,
+    response: FixtureResponse,
+    opts?: { latency?: number; chunkSize?: number },
+  ): this {
+    return this.on({ toolCallId: id }, response, opts);
+  }
+
+  /**
+   * Queue a one-shot error that will be returned for the next matching
+   * request, then automatically removed. Implemented as an internal fixture
+   * with a `predicate` that always matches (so it fires first) and spliced
+   * at the front of the fixture list.
+   */
+  nextRequestError(status: number, errorBody?: { message?: string; type?: string; code?: string }): this {
+    const errorResponse: FixtureResponse = {
+      error: {
+        message: errorBody?.message ?? "Injected error",
+        type: errorBody?.type ?? "server_error",
+        code: errorBody?.code,
+      },
+      status,
+    };
+    const fixture: Fixture = {
+      match: { predicate: () => true },
+      response: errorResponse,
+    };
+    // Insert at front so it matches before everything else
+    this.fixtures.unshift(fixture);
+    // Remove after first match — the journal records it so tests can assert
+    const self = this;
+    const original = fixture.match.predicate!;
+    fixture.match.predicate = (req) => {
+      const result = original(req);
+      if (result) {
+        // Defer splice so it doesn't mutate the array while matchFixture iterates it
+        queueMicrotask(() => {
+          const idx = self.fixtures.indexOf(fixture);
+          if (idx !== -1) self.fixtures.splice(idx, 1);
+        });
+      }
+      return result;
+    };
+    return this;
+  }
+
+  // ---- Journal proxies ----
+
+  getRequests(): import("./types.js").JournalEntry[] {
+    return this.journal.getAll();
+  }
+
+  getLastRequest(): import("./types.js").JournalEntry | null {
+    return this.journal.getLast();
+  }
+
+  clearRequests(): void {
+    this.journal.clear();
+  }
+
+  // ---- Reset ----
+
+  reset(): this {
+    this.clearFixtures();
+    if (this.serverInstance) {
+      this.serverInstance.journal.clear();
+    }
+    return this;
+  }
+
   // ---- Server lifecycle ----
 
   async start(): Promise<string> {
@@ -90,6 +176,18 @@ export class MockOpenAI {
       throw new Error("Server not started");
     }
     return this.serverInstance.url;
+  }
+
+  get baseUrl(): string {
+    return this.url;
+  }
+
+  get port(): number {
+    const parsed = new URL(this.url); // this.url throws if not started
+    if (!parsed.port) {
+      throw new Error(`Server URL has no explicit port: ${this.url}`);
+    }
+    return parseInt(parsed.port, 10);
   }
 
   // ---- Static factory ----

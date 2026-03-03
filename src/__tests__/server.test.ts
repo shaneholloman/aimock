@@ -52,7 +52,7 @@ function get(
       {
         hostname: parsed.hostname,
         port: parsed.port,
-        path: parsed.pathname,
+        path: parsed.pathname + parsed.search,
         method: "GET",
       },
       (res) => {
@@ -399,6 +399,101 @@ describe("CORS", () => {
     });
 
     expect(res.headers["access-control-allow-origin"]).toBe("*");
+  });
+});
+
+describe("GET /v1/_requests", () => {
+  it("returns journal entries as JSON", async () => {
+    instance = await createServer(allFixtures);
+    await post(`${instance.url}/v1/chat/completions`, {
+      model: "gpt-4",
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    const res = await get(`${instance.url}/v1/_requests`);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/json");
+
+    const entries = JSON.parse(res.body);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].body.messages[0].content).toBe("hello");
+  });
+
+  it("returns empty array when no requests recorded", async () => {
+    instance = await createServer(allFixtures);
+    const res = await get(`${instance.url}/v1/_requests`);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual([]);
+  });
+
+  it("supports ?limit=N query parameter", async () => {
+    instance = await createServer(allFixtures);
+    const url = `${instance.url}/v1/chat/completions`;
+    await post(url, { model: "gpt-4", messages: [{ role: "user", content: "hello" }] });
+    await post(url, { model: "gpt-4", messages: [{ role: "user", content: "hello" }] });
+    await post(url, { model: "gpt-4", messages: [{ role: "user", content: "hello" }] });
+
+    const res = await get(`${instance.url}/v1/_requests?limit=2`);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toHaveLength(2);
+  });
+
+  it("returns 400 for invalid limit parameter", async () => {
+    instance = await createServer(allFixtures);
+    const res = await get(`${instance.url}/v1/_requests?limit=abc`);
+    expect(res.status).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.message).toContain("Invalid limit");
+  });
+
+  it("returns 400 for limit=0", async () => {
+    instance = await createServer(allFixtures);
+    const res = await get(`${instance.url}/v1/_requests?limit=0`);
+    expect(res.status).toBe(400);
+  });
+
+  it("includes CORS headers", async () => {
+    instance = await createServer(allFixtures);
+    const res = await get(`${instance.url}/v1/_requests`);
+    expect(res.headers["access-control-allow-origin"]).toBe("*");
+  });
+});
+
+describe("DELETE /v1/_requests", () => {
+  it("clears the journal and returns 204", async () => {
+    instance = await createServer(allFixtures);
+    await post(`${instance.url}/v1/chat/completions`, {
+      model: "gpt-4",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    expect(instance.journal.size).toBe(1);
+
+    const delRes = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const parsed = new URL(`${instance!.url}/v1/_requests`);
+      const req = http.request(
+        {
+          hostname: parsed.hostname,
+          port: parsed.port,
+          path: parsed.pathname,
+          method: "DELETE",
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c: Buffer) => chunks.push(c));
+          res.on("end", () => {
+            resolve({
+              status: res.statusCode ?? 0,
+              body: Buffer.concat(chunks).toString(),
+            });
+          });
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+
+    expect(delRes.status).toBe(204);
+    expect(instance.journal.size).toBe(0);
   });
 });
 

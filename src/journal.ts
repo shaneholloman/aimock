@@ -1,5 +1,5 @@
 import { generateId } from "./helpers.js";
-import type { JournalEntry } from "./types.js";
+import type { Fixture, JournalEntry } from "./types.js";
 
 export class Journal {
   private entries: JournalEntry[] = [];
@@ -23,6 +23,10 @@ export class Journal {
 
   getLast(): JournalEntry | null {
     return this.entries.length > 0 ? this.entries[this.entries.length - 1] : null;
+  }
+
+  findByFixture(fixture: Fixture): JournalEntry[] {
+    return this.entries.filter((e) => e.response.fixture === fixture);
   }
 
   clear(): void {

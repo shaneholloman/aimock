@@ -20,9 +20,11 @@ export interface ServerInstance {
 const COMPLETIONS_PATH = "/v1/chat/completions";
 const DEFAULT_CHUNK_SIZE = 20;
 
+const REQUESTS_PATH = "/v1/_requests";
+
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
@@ -58,10 +60,35 @@ async function handleCompletions(
 ): Promise<void> {
   setCorsHeaders(res);
 
+  // Read request body
+  let raw: string;
+  try {
+    raw = await readBody(req);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to read request body";
+    journal.add({
+      method: req.method ?? "POST",
+      path: req.url ?? COMPLETIONS_PATH,
+      headers: flattenHeaders(req.headers),
+      body: {} as ChatCompletionRequest,
+      response: { status: 500, fixture: null },
+    });
+    writeErrorResponse(
+      res,
+      500,
+      JSON.stringify({
+        error: {
+          message: `Request body read failed: ${msg}`,
+          type: "server_error",
+        },
+      }),
+    );
+    return;
+  }
+
   // Parse JSON body
   let body: ChatCompletionRequest;
   try {
-    const raw = await readBody(req);
     body = JSON.parse(raw) as ChatCompletionRequest;
   } catch {
     journal.add({
@@ -208,8 +235,50 @@ export async function createServer(
       return;
     }
 
+    // Parse the URL pathname (strip query string)
+    const parsedUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const pathname = parsedUrl.pathname;
+
+    // Journal inspection endpoints
+    if (pathname === REQUESTS_PATH) {
+      setCorsHeaders(res);
+      if (req.method === "GET") {
+        const limitParam = parsedUrl.searchParams.get("limit");
+        let opts: { limit: number } | undefined;
+        if (limitParam) {
+          const limit = parseInt(limitParam, 10);
+          if (Number.isNaN(limit) || limit <= 0) {
+            writeErrorResponse(
+              res,
+              400,
+              JSON.stringify({
+                error: {
+                  message: `Invalid limit parameter: "${limitParam}"`,
+                  type: "invalid_request_error",
+                },
+              }),
+            );
+            return;
+          }
+          opts = { limit };
+        }
+        const entries = journal.getAll(opts);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(entries));
+        return;
+      }
+      if (req.method === "DELETE") {
+        journal.clear();
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      handleNotFound(res, "Not found");
+      return;
+    }
+
     // Only POST /v1/chat/completions
-    if (req.url !== COMPLETIONS_PATH) {
+    if (pathname !== COMPLETIONS_PATH) {
       handleNotFound(res, "Not found");
       return;
     }
@@ -232,7 +301,14 @@ export async function createServer(
           }),
         );
       } else if (!res.writableEnded) {
-        // Headers already sent (SSE stream in progress) — best-effort end
+        // Headers already sent (SSE stream in progress) — write error event then close
+        try {
+          res.write(
+            `data: ${JSON.stringify({ error: { message: msg, type: "server_error" } })}\n\n`,
+          );
+        } catch {
+          // write itself failed, nothing more we can do
+        }
         res.end();
       }
     });
