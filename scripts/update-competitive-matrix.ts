@@ -4,8 +4,8 @@
  * update-competitive-matrix.ts
  *
  * Fetches competitor READMEs from GitHub, extracts feature signals via keyword
- * matching, and updates the comparison table in docs/index.html when evidence
- * of new capabilities is found.
+ * matching, and updates the comparison table in docs/index.html and
+ * corresponding migration pages when evidence of new capabilities is found.
  *
  * Usage:
  *   npx tsx scripts/update-competitive-matrix.ts                        # update in place
@@ -13,7 +13,7 @@
  *   npx tsx scripts/update-competitive-matrix.ts --summary out.md        # write markdown summary
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -122,6 +122,14 @@ const FEATURE_RULES: FeatureRule[] = [
   },
 ];
 
+/** Maps competitor display names to their migration page paths (relative to docs/) */
+const COMPETITOR_MIGRATION_PAGES: Record<string, string> = {
+  VidaiMock: "docs/migrate-from-vidaimock.html",
+  "mock-llm": "docs/migrate-from-mock-llm.html",
+  "piyook/llm-mock": "docs/migrate-from-piyook.html",
+  // MSW, Mokksy, Python don't have GitHub repos in COMPETITORS[] yet
+};
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -171,6 +179,168 @@ function extractFeatures(text: string): Record<string, boolean> {
     });
     result[rule.rowLabel] = found;
   }
+  return result;
+}
+
+/**
+ * Counts how many distinct LLM providers a competitor supports based on their
+ * README text. De-duplicates overlapping patterns (e.g. "anthropic" and "claude"
+ * both map to the same provider).
+ */
+function countProviders(text: string): number {
+  const lower = text.toLowerCase();
+
+  // Group patterns that refer to the same provider
+  const providerGroups: string[][] = [
+    ["openai"],
+    ["claude", "anthropic"],
+    ["gemini", "google.*ai"],
+    ["bedrock", "aws"],
+    ["azure"],
+    ["vertex"],
+    ["ollama"],
+    ["cohere"],
+    ["mistral"],
+    ["groq"],
+    ["together"],
+    ["llama"],
+  ];
+
+  let count = 0;
+  for (const group of providerGroups) {
+    const found = group.some((kw) => new RegExp(kw, "i").test(lower));
+    if (found) count++;
+  }
+  return count;
+}
+
+// ── Migration Page Updating ─────────────────────────────────────────────────
+
+/**
+ * Updates a migration page's comparison table cells from the "no" state
+ * (&#10007;) to the "yes" state (&#10003;) when a feature is detected.
+ *
+ * Migration page tables use a different format than the index.html matrix:
+ * - "Yes" cells: <td style="color: var(--accent)">&#10003;</td>
+ * - "No" cells:  <td style="color: var(--error)">&#10007;</td>
+ *
+ * The function also updates numeric provider claims in both table cells and
+ * prose text (e.g., "5 providers" -> "8 providers").
+ */
+function updateMigrationPage(
+  html: string,
+  competitorName: string,
+  features: Record<string, boolean>,
+  providerCount: number,
+): { html: string; changes: string[] } {
+  let result = html;
+  const changes: string[] = [];
+
+  // Find the comparison table (class="comparison-table" or class="endpoint-table")
+  const tableMatch = result.match(
+    /<table class="(?:comparison-table|endpoint-table)">([\s\S]*?)<\/table>/,
+  );
+  if (!tableMatch) {
+    return { html: result, changes };
+  }
+
+  // Update feature cells: find rows where the competitor column shows &#10007;
+  // and the feature was detected
+  for (const rule of FEATURE_RULES) {
+    if (!features[rule.rowLabel]) continue;
+
+    // Migration tables have different row labels than the index matrix.
+    // We look for rows that conceptually match the feature rule.
+    // The competitor column is always the first data column (index 1) after the label.
+    const rowPatterns = buildMigrationRowPatterns(rule.rowLabel);
+    for (const rowPat of rowPatterns) {
+      const rowRegex = new RegExp(
+        `(<tr>\\s*<td>${escapeRegex(rowPat)}</td>\\s*)<td style="color: var\\(--error\\)">&#10007;</td>`,
+      );
+      if (rowRegex.test(result)) {
+        result = result.replace(rowRegex, `$1<td style="color: var(--accent)">&#10003;</td>`);
+        changes.push(`${competitorName}: ${rowPat} ✗ -> ✓`);
+      }
+    }
+  }
+
+  // Update provider count claims in the competitor column of the table
+  // Match patterns like: >N providers<, >N+ providers<
+  if (providerCount > 0) {
+    result = updateProviderCounts(result, competitorName, providerCount, changes);
+  }
+
+  return { html: result, changes };
+}
+
+/**
+ * Builds possible row label strings that a migration page might use for a given
+ * feature rule. Migration pages use more descriptive labels than the index matrix.
+ */
+function buildMigrationRowPatterns(rowLabel: string): string[] {
+  const patterns = [rowLabel];
+
+  // Add common migration-page variants
+  const variants: Record<string, string[]> = {
+    "Chat Completions SSE": ["OpenAI Chat Completions", "Streaming SSE"],
+    "Responses API SSE": ["OpenAI Responses API"],
+    "Claude Messages API": ["Anthropic Claude"],
+    "Gemini streaming": ["Google Gemini"],
+    "WebSocket APIs": ["WebSocket protocols"],
+    "Structured output / JSON mode": ["Structured output / JSON mode", "Structured output"],
+    "Sequential / stateful responses": ["Sequential responses"],
+    "Docker image": ["Docker"],
+    "Fixture files (JSON)": ["Fixture files"],
+    "CLI server": ["CLI"],
+    "Error injection (one-shot)": ["Error injection"],
+    "Request journal": ["Request journal"],
+    "Drift detection": ["Drift detection"],
+  };
+
+  if (variants[rowLabel]) {
+    patterns.push(...variants[rowLabel]);
+  }
+
+  return patterns;
+}
+
+/**
+ * Scans the HTML for numeric provider claims and updates them if the detected
+ * count is higher. Handles patterns like:
+ * - "N providers" / "N+ providers" (in prose and table cells)
+ * - "supports N LLM" / "N LLM providers"
+ * - "N more providers"
+ */
+function updateProviderCounts(
+  html: string,
+  competitorName: string,
+  detectedCount: number,
+  changes: string[],
+): string {
+  let result = html;
+
+  // Pattern: N+ providers or N providers (in table cells and prose)
+  const providerCountRegex = /(\d+)\+?\s*providers/g;
+  result = result.replace(providerCountRegex, (match, numStr) => {
+    const currentCount = parseInt(numStr, 10);
+    if (detectedCount > currentCount) {
+      changes.push(`${competitorName}: provider count ${currentCount} -> ${detectedCount}`);
+      return `${detectedCount} providers`;
+    }
+    return match;
+  });
+
+  // Pattern: "supports N LLM" or "N LLM providers"
+  const llmProviderRegex = /(\d+)\+?\s*LLM\s*providers?/g;
+  result = result.replace(llmProviderRegex, (match, numStr) => {
+    const currentCount = parseInt(numStr, 10);
+    if (detectedCount > currentCount) {
+      changes.push(`${competitorName}: LLM provider count ${currentCount} -> ${detectedCount}`);
+      return `${detectedCount} LLM providers`;
+    }
+    return match;
+  });
+
   return result;
 }
 
@@ -409,6 +579,8 @@ async function main(): Promise<void> {
 
   // 1. Fetch competitor data
   const competitorFeatures = new Map<string, Record<string, boolean>>();
+  const competitorProviderCounts = new Map<string, number>();
+  const competitorReadmes = new Map<string, string>();
 
   for (const comp of COMPETITORS) {
     console.log(`\n--- ${comp.name} (${comp.repo}) ---`);
@@ -420,8 +592,13 @@ async function main(): Promise<void> {
     }
 
     const combined = `${readme}\n${pkg}`;
+    competitorReadmes.set(comp.name, combined);
     const features = extractFeatures(combined);
     competitorFeatures.set(comp.name, features);
+
+    // Count providers
+    const provCount = countProviders(combined);
+    competitorProviderCounts.set(comp.name, provCount);
 
     // Log detected features
     const detected = Object.entries(features)
@@ -431,6 +608,9 @@ async function main(): Promise<void> {
       console.log(`  Detected features: ${detected.join(", ")}`);
     } else {
       console.log(`  No features detected from keywords.`);
+    }
+    if (provCount > 0) {
+      console.log(`  Detected ${provCount} LLM provider(s).`);
     }
   }
 
@@ -464,13 +644,53 @@ async function main(): Promise<void> {
 
   if (DRY_RUN) {
     console.log("\n[DRY RUN] Would update docs/index.html with the above changes.");
+    console.log("[DRY RUN] Would also update migration pages for changed competitors.");
     return;
   }
 
-  // 5. Apply changes
+  // 5. Apply changes to index.html
   const updated = applyChanges(html, changes);
   writeFileSync(DOCS_PATH, updated, "utf-8");
   console.log("\nUpdated docs/index.html successfully.");
+
+  // 6. Update migration pages for competitors with changes
+  const docsDir = resolve(import.meta.dirname ?? __dirname, "..");
+  const updatedCompetitors = new Set(changes.map((ch) => ch.competitor));
+
+  for (const compName of updatedCompetitors) {
+    const migrationPageRelPath = COMPETITOR_MIGRATION_PAGES[compName];
+    if (!migrationPageRelPath) {
+      console.log(`  No migration page mapped for ${compName}, skipping.`);
+      continue;
+    }
+
+    const migrationPagePath = resolve(docsDir, migrationPageRelPath);
+    if (!existsSync(migrationPagePath)) {
+      console.log(`  Migration page not found: ${migrationPagePath}, skipping.`);
+      continue;
+    }
+
+    const migrationHtml = readFileSync(migrationPagePath, "utf-8");
+    const features = competitorFeatures.get(compName) ?? {};
+    const provCount = competitorProviderCounts.get(compName) ?? 0;
+
+    const { html: updatedMigration, changes: migrationChanges } = updateMigrationPage(
+      migrationHtml,
+      compName,
+      features,
+      provCount,
+    );
+
+    if (migrationChanges.length > 0) {
+      writeFileSync(migrationPagePath, updatedMigration, "utf-8");
+      console.log(`\nUpdated ${migrationPageRelPath}:`);
+      for (const ch of migrationChanges) {
+        console.log(`  ${ch}`);
+      }
+    } else {
+      console.log(`\n${migrationPageRelPath}: no migration page changes needed.`);
+    }
+  }
 }
 
 main().catch((err) => {
