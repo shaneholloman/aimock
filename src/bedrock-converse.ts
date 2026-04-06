@@ -156,12 +156,20 @@ export function converseToCompletionRequest(
 
 // ─── Response builders ──────────────────────────────────────────────────────
 
-function buildConverseTextResponse(content: string): object {
+function buildConverseTextResponse(content: string, reasoning?: string): object {
+  const contentBlocks: object[] = [];
+  if (reasoning) {
+    contentBlocks.push({
+      reasoningContent: { reasoningText: { text: reasoning } },
+    });
+  }
+  contentBlocks.push({ text: content });
+
   return {
     output: {
       message: {
         role: "assistant",
-        content: [{ text: content }],
+        content: contentBlocks,
       },
     },
     stopReason: "end_turn",
@@ -363,7 +371,7 @@ export async function handleConverse(
       body: completionReq,
       response: { status: 200, fixture },
     });
-    const body = buildConverseTextResponse(response.content);
+    const body = buildConverseTextResponse(response.content, response.reasoning);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
     return;
@@ -568,7 +576,7 @@ export async function handleConverseStream(
       body: completionReq,
       response: { status: 200, fixture },
     });
-    const events = buildBedrockStreamTextEvents(response.content, chunkSize);
+    const events = buildBedrockStreamTextEvents(response.content, chunkSize, response.reasoning);
     const interruption = createInterruptionSignal(fixture);
     const completed = await writeEventStream(res, events, {
       latency,

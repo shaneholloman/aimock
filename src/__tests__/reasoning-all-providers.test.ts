@@ -299,3 +299,42 @@ describe("POST /model/{id}/invoke (reasoning non-streaming)", () => {
     expect(body.content[0].type).toBe("text");
   });
 });
+
+// ─── Bedrock Converse: Reasoning ────────────────────────────────────────────
+
+describe("POST /model/{id}/converse (reasoning non-streaming)", () => {
+  it("includes reasoningContent block before text block", async () => {
+    instance = await createServer(allFixtures);
+    const res = await post(
+      `${instance.url}/model/anthropic.claude-3-sonnet-20240229-v1:0/converse`,
+      {
+        messages: [{ role: "user", content: [{ text: "think" }] }],
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    const content = body.output.message.content;
+    expect(content).toHaveLength(2);
+    expect(content[0].reasoningContent).toBeDefined();
+    expect(content[0].reasoningContent.reasoningText.text).toBe(
+      "Let me think step by step about this problem.",
+    );
+    expect(content[1].text).toBe("The answer is 42.");
+  });
+
+  it("no reasoningContent block when reasoning is absent", async () => {
+    instance = await createServer(allFixtures);
+    const res = await post(
+      `${instance.url}/model/anthropic.claude-3-sonnet-20240229-v1:0/converse`,
+      {
+        messages: [{ role: "user", content: [{ text: "plain" }] }],
+      },
+    );
+
+    const body = JSON.parse(res.body);
+    const content = body.output.message.content;
+    expect(content).toHaveLength(1);
+    expect(content[0].text).toBe("Just plain text.");
+  });
+});
