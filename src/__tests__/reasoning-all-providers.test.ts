@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as http from "node:http";
+import { crc32 } from "node:zlib";
 import type { Fixture } from "../types.js";
 import { createServer, type ServerInstance } from "../server.js";
 import { buildBedrockStreamTextEvents } from "../bedrock.js";
@@ -43,6 +44,98 @@ function post(
     req.write(data);
     req.end();
   });
+}
+
+function postRaw(
+  path: string,
+  body: unknown,
+): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const parsed = new URL(baseUrl);
+    const req = http.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(data),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            headers: res.headers,
+            body: Buffer.concat(chunks),
+          });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+/**
+ * Decode AWS Event Stream binary frames from a Buffer.
+ * Returns an array of { eventType, payload } objects.
+ */
+function decodeEventStreamFrames(buf: Buffer): Array<{ eventType: string; payload: object }> {
+  const frames: Array<{ eventType: string; payload: object }> = [];
+  let offset = 0;
+
+  while (offset < buf.length) {
+    if (offset + 12 > buf.length) break;
+
+    const totalLength = buf.readUInt32BE(offset);
+    const headersLength = buf.readUInt32BE(offset + 4);
+    const preludeCrc = buf.readUInt32BE(offset + 8);
+
+    // Verify prelude CRC
+    const computedPreludeCrc = crc32(buf.subarray(offset, offset + 8));
+    if (computedPreludeCrc >>> 0 !== preludeCrc) {
+      throw new Error("Prelude CRC mismatch");
+    }
+
+    // Parse headers
+    const headersStart = offset + 12;
+    const headersEnd = headersStart + headersLength;
+    const headers: Record<string, string> = {};
+    let hOff = headersStart;
+    while (hOff < headersEnd) {
+      const nameLen = buf.readUInt8(hOff);
+      hOff += 1;
+      const name = buf.subarray(hOff, hOff + nameLen).toString("utf8");
+      hOff += nameLen;
+      hOff += 1; // skip header type byte (7 = STRING)
+      const valueLen = buf.readUInt16BE(hOff);
+      hOff += 2;
+      const value = buf.subarray(hOff, hOff + valueLen).toString("utf8");
+      hOff += valueLen;
+      headers[name] = value;
+    }
+
+    // Parse payload
+    const payloadStart = headersEnd;
+    const payloadEnd = offset + totalLength - 4; // minus message CRC
+    const payloadBuf = buf.subarray(payloadStart, payloadEnd);
+    const payload = payloadBuf.length > 0 ? JSON.parse(payloadBuf.toString("utf8")) : {};
+
+    frames.push({
+      eventType: headers[":event-type"] ?? "",
+      payload,
+    });
+
+    offset += totalLength;
+  }
+
+  return frames;
 }
 
 interface SSEEvent {
@@ -322,6 +415,149 @@ describe("POST /model/{id}/converse (reasoning non-streaming)", () => {
     const content = body.output.message.content;
     expect(content).toHaveLength(1);
     expect(content[0].text).toBe("Just plain text.");
+  });
+});
+
+// ─── Bedrock InvokeModel Streaming: Reasoning ─────────────────────────────────
+
+describe("POST /model/{id}/invoke-with-response-stream (reasoning streaming)", () => {
+  it("emits thinking block events before text content events", async () => {
+    const res = await postRaw(
+      `/model/anthropic.claude-3-sonnet-20240229-v1:0/invoke-with-response-stream`,
+      {
+        messages: [{ role: "user", content: [{ type: "text", text: "think" }] }],
+        max_tokens: 1024,
+        anthropic_version: "bedrock-2023-05-31",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const frames = decodeEventStreamFrames(res.body);
+    const eventTypes = frames.map((f) => f.eventType);
+
+    // Should start with messageStart
+    expect(eventTypes[0]).toBe("messageStart");
+
+    // Find thinking and text block starts
+    const thinkingStartIdx = frames.findIndex(
+      (f) =>
+        f.eventType === "contentBlockStart" &&
+        (f.payload as { start?: { type?: string } }).start?.type === "thinking",
+    );
+    const textStartIdx = frames.findIndex(
+      (f) =>
+        f.eventType === "contentBlockStart" &&
+        (f.payload as { start?: { type?: string } }).start?.type === undefined,
+    );
+
+    expect(thinkingStartIdx).toBeGreaterThan(0);
+    expect(textStartIdx).toBeGreaterThan(thinkingStartIdx);
+
+    // Verify thinking content
+    const thinkingDeltas = frames.filter(
+      (f) =>
+        f.eventType === "contentBlockDelta" &&
+        (f.payload as { delta?: { type?: string } }).delta?.type === "thinking_delta",
+    );
+    const fullThinking = thinkingDeltas
+      .map((f) => (f.payload as { delta: { thinking: string } }).delta.thinking)
+      .join("");
+    expect(fullThinking).toBe("Let me think step by step about this problem.");
+
+    // Verify text content
+    const textDeltas = frames.filter(
+      (f) =>
+        f.eventType === "contentBlockDelta" &&
+        (f.payload as { delta?: { type?: string } }).delta?.type === "text_delta",
+    );
+    const fullText = textDeltas
+      .map((f) => (f.payload as { delta: { text: string } }).delta.text)
+      .join("");
+    expect(fullText).toBe("The answer is 42.");
+
+    // Should end with messageStop
+    expect(eventTypes[eventTypes.length - 1]).toBe("messageStop");
+  });
+
+  it("no thinking block when reasoning is absent", async () => {
+    const res = await postRaw(
+      `/model/anthropic.claude-3-sonnet-20240229-v1:0/invoke-with-response-stream`,
+      {
+        messages: [{ role: "user", content: [{ type: "text", text: "plain" }] }],
+        max_tokens: 1024,
+        anthropic_version: "bedrock-2023-05-31",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const frames = decodeEventStreamFrames(res.body);
+
+    const thinkingDeltas = frames.filter(
+      (f) =>
+        f.eventType === "contentBlockDelta" &&
+        (f.payload as { delta?: { type?: string } }).delta?.type === "thinking_delta",
+    );
+    expect(thinkingDeltas).toHaveLength(0);
+  });
+});
+
+// ─── Bedrock Converse Streaming: Reasoning ────────────────────────────────────
+
+describe("POST /model/{id}/converse-stream (reasoning streaming)", () => {
+  it("emits thinking block events before text content events", async () => {
+    const res = await postRaw(`/model/anthropic.claude-3-sonnet-20240229-v1:0/converse-stream`, {
+      messages: [{ role: "user", content: [{ text: "think" }] }],
+    });
+
+    expect(res.status).toBe(200);
+    const frames = decodeEventStreamFrames(res.body);
+    const eventTypes = frames.map((f) => f.eventType);
+
+    expect(eventTypes[0]).toBe("messageStart");
+
+    // Find thinking and text block starts
+    const thinkingStartIdx = frames.findIndex(
+      (f) =>
+        f.eventType === "contentBlockStart" &&
+        (f.payload as { start?: { type?: string } }).start?.type === "thinking",
+    );
+    const textStartIdx = frames.findIndex(
+      (f) =>
+        f.eventType === "contentBlockStart" &&
+        (f.payload as { start?: { type?: string } }).start?.type === undefined,
+    );
+
+    expect(thinkingStartIdx).toBeGreaterThan(0);
+    expect(textStartIdx).toBeGreaterThan(thinkingStartIdx);
+
+    // Verify reasoning content appears in the stream
+    const thinkingDeltas = frames.filter(
+      (f) =>
+        f.eventType === "contentBlockDelta" &&
+        (f.payload as { delta?: { type?: string } }).delta?.type === "thinking_delta",
+    );
+    const fullThinking = thinkingDeltas
+      .map((f) => (f.payload as { delta: { thinking: string } }).delta.thinking)
+      .join("");
+    expect(fullThinking).toBe("Let me think step by step about this problem.");
+
+    expect(eventTypes[eventTypes.length - 1]).toBe("messageStop");
+  });
+
+  it("no thinking block when reasoning is absent", async () => {
+    const res = await postRaw(`/model/anthropic.claude-3-sonnet-20240229-v1:0/converse-stream`, {
+      messages: [{ role: "user", content: [{ text: "plain" }] }],
+    });
+
+    expect(res.status).toBe(200);
+    const frames = decodeEventStreamFrames(res.body);
+
+    const thinkingDeltas = frames.filter(
+      (f) =>
+        f.eventType === "contentBlockDelta" &&
+        (f.payload as { delta?: { type?: string } }).delta?.type === "thinking_delta",
+    );
+    expect(thinkingDeltas).toHaveLength(0);
   });
 });
 
