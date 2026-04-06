@@ -62,7 +62,12 @@ export function isEmbeddingResponse(r: FixtureResponse): r is EmbeddingResponse 
   return "embedding" in r && Array.isArray((r as EmbeddingResponse).embedding);
 }
 
-export function buildTextChunks(content: string, model: string, chunkSize: number): SSEChunk[] {
+export function buildTextChunks(
+  content: string,
+  model: string,
+  chunkSize: number,
+  reasoning?: string,
+): SSEChunk[] {
   const id = generateId();
   const created = Math.floor(Date.now() / 1000);
   const chunks: SSEChunk[] = [];
@@ -75,6 +80,20 @@ export function buildTextChunks(content: string, model: string, chunkSize: numbe
     model,
     choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }],
   });
+
+  // Reasoning chunks (emitted before content chunks)
+  if (reasoning !== undefined) {
+    for (let i = 0; i < reasoning.length; i += chunkSize) {
+      const slice = reasoning.slice(i, i + chunkSize);
+      chunks.push({
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model,
+        choices: [{ index: 0, delta: { reasoning_content: slice }, finish_reason: null }],
+      });
+    }
+  }
 
   // Content chunks
   for (let i = 0; i < content.length; i += chunkSize) {
@@ -183,7 +202,11 @@ export function buildToolCallChunks(
 
 // Non-streaming response builders
 
-export function buildTextCompletion(content: string, model: string): ChatCompletion {
+export function buildTextCompletion(
+  content: string,
+  model: string,
+  reasoning?: string,
+): ChatCompletion {
   return {
     id: generateId(),
     object: "chat.completion",
@@ -192,7 +215,12 @@ export function buildTextCompletion(content: string, model: string): ChatComplet
     choices: [
       {
         index: 0,
-        message: { role: "assistant", content, refusal: null },
+        message: {
+          role: "assistant",
+          content,
+          refusal: null,
+          ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}),
+        },
         finish_reason: "stop",
       },
     ],

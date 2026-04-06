@@ -454,11 +454,11 @@ async function handleCompletions(
       response: { status: 200, fixture },
     });
     if (body.stream !== true) {
-      const completion = buildTextCompletion(response.content, body.model);
+      const completion = buildTextCompletion(response.content, body.model, response.reasoning);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(completion));
     } else {
-      const chunks = buildTextChunks(response.content, body.model, chunkSize);
+      const chunks = buildTextChunks(response.content, body.model, chunkSize, response.reasoning);
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeSSEStream(res, chunks, {
         latency,

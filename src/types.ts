@@ -200,6 +200,7 @@ export interface SSEChoice {
 export interface SSEDelta {
   role?: string;
   content?: string | null;
+  reasoning_content?: string;
   tool_calls?: SSEToolCallDelta[];
 }
 
@@ -231,6 +232,7 @@ export interface ChatCompletionMessage {
   role: "assistant";
   content: string | null;
   refusal: string | null;
+  reasoning_content?: string;
   tool_calls?: ToolCallMessage[];
 }
 
