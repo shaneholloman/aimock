@@ -88,6 +88,7 @@
 
   // ─── Detect current page ────────────────────────────────────────
   var currentPage = window.location.pathname.split("/").pop() || "index.html";
+  if (currentPage === "" || currentPage === "/") currentPage = "index.html";
 
   // ─── Build Sidebar HTML ─────────────────────────────────────────
   function buildSidebar() {

@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Redirect /index.html to clean URL -->
+    <script>
+      if (window.location.pathname.endsWith("/index.html")) {
+        window.history.replaceState(null, "", "/");
+      }
+    </script>
     <title>aimock — Deterministic mock infrastructure for AI apps</title>
     <meta
       name="description"
