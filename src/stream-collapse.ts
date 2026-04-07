@@ -98,6 +98,11 @@ export function collapseOpenAISSE(body: string): CollapseResult {
     const delta = choices[0].delta as Record<string, unknown> | undefined;
     if (!delta) continue;
 
+    // Reasoning content (OpenRouter / chat completions format)
+    if (typeof delta.reasoning_content === "string") {
+      reasoning += delta.reasoning_content;
+    }
+
     // Text content
     if (typeof delta.content === "string") {
       content += delta.content;

@@ -72,16 +72,7 @@ export function buildTextChunks(
   const created = Math.floor(Date.now() / 1000);
   const chunks: SSEChunk[] = [];
 
-  // Role chunk
-  chunks.push({
-    id,
-    object: "chat.completion.chunk",
-    created,
-    model,
-    choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }],
-  });
-
-  // Reasoning chunks (emitted before content chunks)
+  // Reasoning chunks (emitted before content, OpenRouter format)
   if (reasoning) {
     for (let i = 0; i < reasoning.length; i += chunkSize) {
       const slice = reasoning.slice(i, i + chunkSize);
@@ -94,6 +85,15 @@ export function buildTextChunks(
       });
     }
   }
+
+  // Role chunk
+  chunks.push({
+    id,
+    object: "chat.completion.chunk",
+    created,
+    model,
+    choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }],
+  });
 
   // Content chunks
   for (let i = 0; i < content.length; i += chunkSize) {

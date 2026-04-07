@@ -1792,3 +1792,35 @@ describe("collapseAnthropicSSE with thinking", () => {
     expect(result.reasoning).toBeUndefined();
   });
 });
+
+describe("collapseOpenAISSE with chat completions reasoning_content", () => {
+  it("extracts reasoning from reasoning_content delta fields", () => {
+    const body = [
+      `data: ${JSON.stringify({ id: "chatcmpl-1", choices: [{ delta: { reasoning_content: "Let me " } }] })}`,
+      "",
+      `data: ${JSON.stringify({ id: "chatcmpl-1", choices: [{ delta: { reasoning_content: "think." } }] })}`,
+      "",
+      `data: ${JSON.stringify({ id: "chatcmpl-1", choices: [{ delta: { content: "Answer" } }] })}`,
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+
+    const result = collapseOpenAISSE(body);
+    expect(result.content).toBe("Answer");
+    expect(result.reasoning).toBe("Let me think.");
+  });
+
+  it("handles reasoning_content without regular content", () => {
+    const body = [
+      `data: ${JSON.stringify({ id: "chatcmpl-2", choices: [{ delta: { reasoning_content: "Thinking only" } }] })}`,
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+
+    const result = collapseOpenAISSE(body);
+    expect(result.reasoning).toBe("Thinking only");
+    expect(result.content).toBe("");
+  });
+});

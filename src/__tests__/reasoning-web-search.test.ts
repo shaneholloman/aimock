@@ -549,3 +549,125 @@ describe("POST /v1/messages (thinking blocks non-streaming)", () => {
     expect(body.content[0].type).toBe("text");
   });
 });
+
+// ─── Chat Completions: reasoning_content (OpenRouter format) ────────────────
+
+interface ChatCompletionChunk {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: {
+    index: number;
+    delta: { role?: string; content?: string | null; reasoning_content?: string };
+    finish_reason: string | null;
+  }[];
+}
+
+function parseChatCompletionSSEChunks(body: string): ChatCompletionChunk[] {
+  const chunks: ChatCompletionChunk[] = [];
+  for (const line of body.split("\n")) {
+    if (line.startsWith("data: ") && line.slice(6).trim() !== "[DONE]") {
+      chunks.push(JSON.parse(line.slice(6)) as ChatCompletionChunk);
+    }
+  }
+  return chunks;
+}
+
+describe("POST /v1/chat/completions (reasoning_content streaming)", () => {
+  it("emits reasoning_content deltas before content deltas", async () => {
+    instance = await createServer(allFixtures);
+    const res = await post(`${instance.url}/v1/chat/completions`, {
+      model: "gpt-4",
+      messages: [{ role: "user", content: "think" }],
+      stream: true,
+    });
+
+    expect(res.status).toBe(200);
+    const chunks = parseChatCompletionSSEChunks(res.body);
+
+    const reasoningChunks = chunks.filter((c) => c.choices[0]?.delta.reasoning_content);
+    const contentChunks = chunks.filter(
+      (c) => c.choices[0]?.delta.content && c.choices[0].delta.content.length > 0,
+    );
+
+    expect(reasoningChunks.length).toBeGreaterThan(0);
+    expect(contentChunks.length).toBeGreaterThan(0);
+
+    // All reasoning chunks appear before all content chunks
+    const lastReasoningIdx = chunks.lastIndexOf(reasoningChunks[reasoningChunks.length - 1]);
+    const firstContentIdx = chunks.indexOf(contentChunks[0]);
+    expect(lastReasoningIdx).toBeLessThan(firstContentIdx);
+  });
+
+  it("reasoning_content deltas reconstruct full reasoning text", async () => {
+    instance = await createServer(allFixtures);
+    const res = await post(`${instance.url}/v1/chat/completions`, {
+      model: "gpt-4",
+      messages: [{ role: "user", content: "think" }],
+      stream: true,
+    });
+
+    const chunks = parseChatCompletionSSEChunks(res.body);
+    const reasoning = chunks.map((c) => c.choices[0]?.delta.reasoning_content ?? "").join("");
+    expect(reasoning).toBe("Let me think step by step about this problem.");
+  });
+
+  it("content deltas still reconstruct full text", async () => {
+    instance = await createServer(allFixtures);
+    const res = await post(`${instance.url}/v1/chat/completions`, {
+      model: "gpt-4",
+      messages: [{ role: "user", content: "think" }],
+      stream: true,
+    });
+
+    const chunks = parseChatCompletionSSEChunks(res.body);
+    const content = chunks.map((c) => c.choices[0]?.delta.content ?? "").join("");
+    expect(content).toBe("The answer is 42.");
+  });
+
+  it("no reasoning_content when reasoning is absent", async () => {
+    instance = await createServer(allFixtures);
+    const res = await post(`${instance.url}/v1/chat/completions`, {
+      model: "gpt-4",
+      messages: [{ role: "user", content: "plain" }],
+      stream: true,
+    });
+
+    const chunks = parseChatCompletionSSEChunks(res.body);
+    const reasoningChunks = chunks.filter((c) => c.choices[0]?.delta.reasoning_content);
+    expect(reasoningChunks).toHaveLength(0);
+  });
+});
+
+describe("POST /v1/chat/completions (reasoning_content non-streaming)", () => {
+  it("includes reasoning_content in non-streaming response", async () => {
+    instance = await createServer(allFixtures);
+    const res = await post(`${instance.url}/v1/chat/completions`, {
+      model: "gpt-4",
+      messages: [{ role: "user", content: "think" }],
+      stream: false,
+    });
+
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.object).toBe("chat.completion");
+    expect(body.choices[0].message.content).toBe("The answer is 42.");
+    expect(body.choices[0].message.reasoning_content).toBe(
+      "Let me think step by step about this problem.",
+    );
+  });
+
+  it("no reasoning_content when reasoning is absent", async () => {
+    instance = await createServer(allFixtures);
+    const res = await post(`${instance.url}/v1/chat/completions`, {
+      model: "gpt-4",
+      messages: [{ role: "user", content: "plain" }],
+      stream: false,
+    });
+
+    const body = JSON.parse(res.body);
+    expect(body.choices[0].message.content).toBe("Just plain text.");
+    expect(body.choices[0].message.reasoning_content).toBeUndefined();
+  });
+});
