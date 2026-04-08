@@ -1,5 +1,23 @@
 # @copilotkit/aimock
 
+## 1.9.0
+
+### Minor Changes
+
+- Per-test sequence isolation via `X-Test-Id` header — each test gets its own fixture match counters, wired through all 12 HTTP handlers and 3 WebSocket handlers. No more test pollution from shared sequential state (#93)
+- Combined `content + toolCalls` in fixture responses — new `ContentWithToolCallsResponse` type and type guard, supported across OpenAI Chat, OpenAI Responses, Anthropic Messages, and Gemini, with stream collapse support (#92)
+- OpenRouter `reasoning_content` support in chat completions (#88)
+
+### Patch Changes
+
+- Fix `web_search_call` items to use `action.query` matching real OpenAI API format (#89)
+- Clean up homepage URL (remove `/index.html` suffix) (#90)
+- Center Record & Replay section title and top-align terminal panel (#87)
+- Add demo video to README (#91)
+- CI: Slack notifications for drift tests, competitive matrix updates, and new PRs (#86)
+- CI: use `pull_request_target` for fork PR Slack alerts
+- Docs: add reasoning and webSearches to Response Types table
+
 ## 1.8.0
 
 ### Minor Changes
