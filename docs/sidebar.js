@@ -199,6 +199,8 @@
     if (active) active.scrollIntoView({ block: "center" });
   }
 
+  // Only inject section bar on the overview page (/docs) — inner pages should not show it
+  var isOverview = currentPage === "/docs";
   var sectionBarEl = document.getElementById("section-bar");
-  if (sectionBarEl) sectionBarEl.innerHTML = buildSectionBar();
+  if (sectionBarEl && isOverview) sectionBarEl.innerHTML = buildSectionBar();
 })();
