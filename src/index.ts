@@ -156,6 +156,55 @@ export type {
   A2ATaskState,
 } from "./a2a-types.js";
 
+// AG-UI
+export { AGUIMock } from "./agui-mock.js";
+export { proxyAndRecordAGUI } from "./agui-recorder.js";
+export type {
+  AGUIMockOptions,
+  AGUIRunAgentInput,
+  AGUIMessage,
+  AGUIToolDefinition,
+  AGUIToolCall,
+  AGUIEvent,
+  AGUIEventType,
+  AGUIFixture,
+  AGUIFixtureMatch,
+  AGUIRecordConfig,
+  // Key individual event types
+  AGUIRunStartedEvent,
+  AGUIRunFinishedEvent,
+  AGUIRunErrorEvent,
+  AGUITextMessageStartEvent,
+  AGUITextMessageContentEvent,
+  AGUITextMessageEndEvent,
+  AGUITextMessageChunkEvent,
+  AGUIToolCallStartEvent,
+  AGUIToolCallArgsEvent,
+  AGUIToolCallEndEvent,
+  AGUIToolCallResultEvent,
+  AGUIStateSnapshotEvent,
+  AGUIStateDeltaEvent,
+  AGUIMessagesSnapshotEvent,
+  AGUIActivitySnapshotEvent,
+  AGUIActivityDeltaEvent,
+} from "./agui-types.js";
+export {
+  buildTextResponse as buildAGUITextResponse,
+  buildTextChunkResponse as buildAGUITextChunkResponse,
+  buildToolCallResponse as buildAGUIToolCallResponse,
+  buildStateUpdate as buildAGUIStateUpdate,
+  buildStateDelta as buildAGUIStateDelta,
+  buildMessagesSnapshot as buildAGUIMessagesSnapshot,
+  buildReasoningResponse as buildAGUIReasoningResponse,
+  buildActivityResponse as buildAGUIActivityResponse,
+  buildErrorResponse as buildAGUIErrorResponse,
+  buildStepWithText as buildAGUIStepWithText,
+  buildCompositeResponse as buildAGUICompositeResponse,
+  extractLastUserMessage as extractAGUILastUserMessage,
+  findFixture as findAGUIFixture,
+  writeAGUIEventStream,
+} from "./agui-handler.js";
+
 // JSON-RPC
 export { createJsonRpcDispatcher } from "./jsonrpc.js";
 export type { JsonRpcResponse, MethodHandler, JsonRpcDispatcherOptions } from "./jsonrpc.js";

@@ -46,6 +46,7 @@
       links: [
         { label: "MCPMock", href: "/mcp-mock" },
         { label: "A2AMock", href: "/a2a-mock" },
+        { label: "AGUIMock", href: "/agui-mock" },
         { label: "VectorMock", href: "/vector-mock" },
         { label: "Services", href: "/services" },
       ],
@@ -71,21 +72,6 @@
     },
   ];
 
-  // ─── Section Bar Items ──────────────────────────────────────────
-  var sectionBarItems = [
-    { icon: "&#128225;", label: "LLM Mocking", color: "pill-green", href: "/chat-completions" },
-    { icon: "&#128268;", label: "MCP Protocol", color: "pill-blue", href: "/mcp-mock" },
-    { icon: "&#129309;", label: "A2A Protocol", color: "pill-purple", href: "/a2a-mock" },
-    { icon: "&#128230;", label: "Vector DBs", color: "pill-amber", href: "/vector-mock" },
-    { icon: "&#128269;", label: "Search &amp; Rerank", color: "pill-red", href: "/services" },
-    {
-      icon: "&#9881;",
-      label: "Chaos &amp; DevOps",
-      color: "pill-gray",
-      href: "/chaos-testing",
-    },
-  ];
-
   // ─── Detect current page ────────────────────────────────────────
   var p = window.location.pathname.replace(/\/index\.html$/, "").replace(/\/$/, "");
   var currentPage = p || "/";
@@ -107,90 +93,6 @@
     return html;
   }
 
-  // ─── Build Section Bar HTML ─────────────────────────────────────
-  function buildSectionBar() {
-    var html = '<div class="section-bar-inner">';
-    for (var i = 0; i < sectionBarItems.length; i++) {
-      var item = sectionBarItems[i];
-      html +=
-        '<a href="' +
-        item.href +
-        '" class="section-pill ' +
-        item.color +
-        '">' +
-        '<span class="section-pill-icon">' +
-        item.icon +
-        "</span> " +
-        item.label +
-        "</a>";
-    }
-    html += "</div>";
-    return html;
-  }
-
-  // ─── Inject Section Bar CSS ─────────────────────────────────────
-  var style = document.createElement("style");
-  style.textContent =
-    ".section-bar {" +
-    "  position: sticky;" +
-    "  top: 57px;" +
-    "  z-index: 90;" +
-    "  background: rgba(10, 10, 15, 0.85);" +
-    "  backdrop-filter: blur(20px) saturate(1.4);" +
-    "  -webkit-backdrop-filter: blur(20px) saturate(1.4);" +
-    "  border-bottom: 1px solid var(--border);" +
-    "  padding: 0.85rem 0;" +
-    "  overflow-x: auto;" +
-    "  -webkit-overflow-scrolling: touch;" +
-    "  scrollbar-width: none;" +
-    "}" +
-    ".section-bar::-webkit-scrollbar { display: none; }" +
-    ".section-bar-inner {" +
-    "  max-width: 1400px;" +
-    "  margin: 0 auto;" +
-    "  padding: 0 2rem;" +
-    "  display: flex;" +
-    "  align-items: center;" +
-    "  gap: 0.65rem;" +
-    "}" +
-    ".section-pill {" +
-    "  display: inline-flex;" +
-    "  align-items: center;" +
-    "  gap: 0.4rem;" +
-    "  padding: 0.5rem 0.85rem;" +
-    "  background: var(--bg-card);" +
-    "  border: 1px solid var(--border);" +
-    "  border-radius: 4px;" +
-    "  font-family: var(--font-mono);" +
-    "  font-size: 0.72rem;" +
-    "  font-weight: 500;" +
-    "  color: var(--text-secondary);" +
-    "  white-space: nowrap;" +
-    "  transition: all 0.2s var(--ease-out-expo);" +
-    "  text-decoration: none;" +
-    "}" +
-    ".section-pill:hover {" +
-    "  color: var(--text-primary);" +
-    "  border-color: var(--border-bright);" +
-    "  background: var(--bg-card-hover);" +
-    "  text-decoration: none;" +
-    "  transform: translateY(-1px);" +
-    "}" +
-    ".section-pill.pill-green  { border-left: 3px solid var(--accent); }" +
-    ".section-pill.pill-blue   { border-left: 3px solid var(--blue); }" +
-    ".section-pill.pill-purple { border-left: 3px solid var(--purple); }" +
-    ".section-pill.pill-amber  { border-left: 3px solid var(--warning); }" +
-    ".section-pill.pill-red    { border-left: 3px solid var(--error); }" +
-    ".section-pill.pill-gray   { border-left: 3px solid var(--text-dim); }" +
-    ".section-pill-icon {" +
-    "  font-size: 0.85rem;" +
-    "  line-height: 1;" +
-    "}" +
-    "@media (max-width: 900px) {" +
-    "  .section-bar-inner { padding: 0 1rem; }" +
-    "}";
-  document.head.appendChild(style);
-
   // ─── Inject into DOM ────────────────────────────────────────────
   var sidebarEl = document.getElementById("sidebar");
   if (sidebarEl) {
@@ -198,11 +100,6 @@
     var active = sidebarEl.querySelector(".active");
     if (active) active.scrollIntoView({ block: "center" });
   }
-
-  // Only inject section bar on the overview page (/docs) — inner pages should not show it
-  var isOverview = currentPage === "/docs";
-  var sectionBarEl = document.getElementById("section-bar");
-  if (sectionBarEl && isOverview) sectionBarEl.innerHTML = buildSectionBar();
 
   // ─── Page TOC (right sidebar) ──────────────────────────────────
   function buildPageToc() {

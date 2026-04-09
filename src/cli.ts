@@ -6,6 +6,7 @@ import { createServer } from "./server.js";
 import { loadFixtureFile, loadFixturesFromDir, validateFixtures } from "./fixture-loader.js";
 import { Logger, type LogLevel } from "./logger.js";
 import { watchFixtures } from "./watcher.js";
+import { AGUIMock } from "./agui-mock.js";
 import type { ChaosConfig, RecordConfig } from "./types.js";
 
 const HELP = `
@@ -32,6 +33,9 @@ Options:
       --provider-azure <url>      Upstream URL for Azure OpenAI
       --provider-ollama <url>     Upstream URL for Ollama
       --provider-cohere <url>     Upstream URL for Cohere
+      --agui-record              Enable AG-UI recording (proxy unmatched AG-UI requests)
+      --agui-upstream <url>      Upstream AG-UI agent URL (used with --agui-record)
+      --agui-proxy-only          AG-UI proxy mode: forward without saving
       --chaos-drop <rate>   Probability (0-1) of dropping requests with 500
       --chaos-malformed <rate>  Probability (0-1) of returning malformed JSON
       --chaos-disconnect <rate> Probability (0-1) of destroying connection
@@ -60,6 +64,9 @@ const { values } = parseArgs({
     "provider-azure": { type: "string" },
     "provider-ollama": { type: "string" },
     "provider-cohere": { type: "string" },
+    "agui-record": { type: "boolean", default: false },
+    "agui-upstream": { type: "string" },
+    "agui-proxy-only": { type: "boolean", default: false },
     "chaos-drop": { type: "string" },
     "chaos-malformed": { type: "string" },
     "chaos-disconnect": { type: "string" },
@@ -168,6 +175,22 @@ if (values.record || values["proxy-only"]) {
   };
 }
 
+// Parse AG-UI record/proxy config from CLI flags
+let aguiMount: { path: string; handler: AGUIMock } | undefined;
+if (values["agui-record"] || values["agui-proxy-only"]) {
+  if (!values["agui-upstream"]) {
+    console.error("Error: --agui-record/--agui-proxy-only requires --agui-upstream");
+    process.exit(1);
+  }
+  const agui = new AGUIMock();
+  agui.enableRecording({
+    upstream: values["agui-upstream"],
+    fixturePath: resolve(fixturePath, "agui-recorded"),
+    proxyOnly: values["agui-proxy-only"],
+  });
+  aguiMount = { path: "/agui", handler: agui };
+}
+
 async function main() {
   // Load fixtures from path (detect file vs directory)
   let isDir: boolean;
@@ -219,17 +242,23 @@ async function main() {
     }
   }
 
-  const instance = await createServer(fixtures, {
-    port,
-    host,
-    latency,
-    chunkSize,
-    logLevel,
-    chaos,
-    metrics: values.metrics,
-    record,
-    strict: values.strict,
-  });
+  const mounts = aguiMount ? [aguiMount] : undefined;
+
+  const instance = await createServer(
+    fixtures,
+    {
+      port,
+      host,
+      latency,
+      chunkSize,
+      logLevel,
+      chaos,
+      metrics: values.metrics,
+      record,
+      strict: values.strict,
+    },
+    mounts,
+  );
 
   logger.info(`aimock server listening on ${instance.url}`);
 

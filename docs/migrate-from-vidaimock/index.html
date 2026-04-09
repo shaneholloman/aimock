@@ -47,8 +47,6 @@
       </div>
     </nav>
 
-    <div id="section-bar"></div>
-
     <div class="docs-layout">
       <aside class="sidebar" id="sidebar"></aside>
 
@@ -57,7 +55,7 @@
         <p class="lead">
           VidaiMock is a capable Rust binary with broad provider support. aimock matches that
           coverage and adds what VidaiMock can&rsquo;t &mdash; a programmatic TypeScript API,
-          WebSocket support, fixture files, request journal, and MCP/A2A/Vector mocking.
+          WebSocket support, fixture files, request journal, and MCP/A2A/AG-UI/Vector mocking.
         </p>
 
         <!-- ═══ The quick switch ══════════════════════════════════════ -->
@@ -166,11 +164,8 @@
           </div>
           <div class="feature-link">
             <span class="badge badge-amber">Protocols</span>
-            <h3>MCP / A2A / Vector</h3>
-            <p>
-              Mock MCP tool servers, A2A agent-to-agent endpoints, and vector database APIs
-              alongside your LLM mocks on one port.
-            </p>
+            <h3>MCP / A2A / AG-UI / Vector</h3>
+            <p>Mock your entire AI stack — LLM, MCP, A2A, AG-UI, vector — on one port.</p>
           </div>
           <div class="feature-link">
             <span class="badge badge-purple">Capture</span>
@@ -234,7 +229,7 @@
               <td>Built-in</td>
             </tr>
             <tr>
-              <td>MCP / A2A / Vector</td>
+              <td>MCP / A2A / AG-UI / Vector</td>
               <td>No</td>
               <td>Built-in</td>
             </tr>
@@ -304,7 +299,7 @@ npx aimock -p 4010 -f ./fixtures
                 With a config file
                 <span class="lang-tag">shell</span>
               </div>
-              <pre><code><span class="cm"># Full config-driven setup (LLM + MCP + A2A on one port)</span>
+              <pre><code><span class="cm"># Full config-driven setup (LLM + MCP + A2A + AG-UI on one port)</span>
 npx aimock --config aimock.json --port 4010</code></pre>
             </div>
           </div>

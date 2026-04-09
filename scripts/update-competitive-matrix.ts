@@ -120,6 +120,10 @@ const FEATURE_RULES: FeatureRule[] = [
     rowLabel: "Error injection (one-shot)",
     keywords: ["error injection", "fault injection", "error simulation", "inject.*error"],
   },
+  {
+    rowLabel: "AG-UI event mocking",
+    keywords: ["ag-ui", "agui", "agent-ui", "copilotkit.*frontend", "event stream mock"],
+  },
 ];
 
 /** Maps competitor display names to their migration page paths (relative to docs/) */
@@ -295,6 +299,7 @@ function buildMigrationRowPatterns(rowLabel: string): string[] {
     "Error injection (one-shot)": ["Error injection"],
     "Request journal": ["Request journal"],
     "Drift detection": ["Drift detection"],
+    "AG-UI event mocking": ["AG-UI event mocking", "AG-UI mocking", "AG-UI"],
   };
 
   if (variants[rowLabel]) {

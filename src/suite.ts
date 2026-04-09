@@ -2,16 +2,19 @@ import { LLMock } from "./llmock.js";
 import { MCPMock } from "./mcp-mock.js";
 import { A2AMock } from "./a2a-mock.js";
 import { VectorMock } from "./vector-mock.js";
+import { AGUIMock } from "./agui-mock.js";
 import type { MockServerOptions } from "./types.js";
 import type { MCPMockOptions } from "./mcp-types.js";
 import type { A2AMockOptions } from "./a2a-types.js";
 import type { VectorMockOptions } from "./vector-types.js";
+import type { AGUIMockOptions } from "./agui-types.js";
 
 export interface MockSuiteOptions {
   llm?: MockServerOptions;
   mcp?: MCPMockOptions;
   a2a?: A2AMockOptions;
   vector?: VectorMockOptions;
+  agui?: AGUIMockOptions;
 }
 
 export interface MockSuite {
@@ -19,6 +22,7 @@ export interface MockSuite {
   mcp?: MCPMock;
   a2a?: A2AMock;
   vector?: VectorMock;
+  agui?: AGUIMock;
   start(): Promise<void>;
   stop(): Promise<void>;
   reset(): void;
@@ -29,6 +33,7 @@ export async function createMockSuite(options: MockSuiteOptions = {}): Promise<M
   let mcp: MCPMock | undefined;
   let a2a: A2AMock | undefined;
   let vector: VectorMock | undefined;
+  let agui: AGUIMock | undefined;
 
   if (options.mcp) {
     mcp = new MCPMock(options.mcp);
@@ -45,11 +50,17 @@ export async function createMockSuite(options: MockSuiteOptions = {}): Promise<M
     llm.mount("/vector", vector);
   }
 
+  if (options.agui) {
+    agui = new AGUIMock(options.agui);
+    llm.mount("/agui", agui);
+  }
+
   return {
     llm,
     mcp,
     a2a,
     vector,
+    agui,
     async start() {
       await llm.start();
     },
@@ -61,6 +72,7 @@ export async function createMockSuite(options: MockSuiteOptions = {}): Promise<M
       if (mcp) mcp.reset();
       if (a2a) a2a.reset();
       if (vector) vector.reset();
+      if (agui) agui.reset();
     },
   };
 }

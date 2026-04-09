@@ -17,78 +17,6 @@
     />
     <link rel="stylesheet" href="../style.css" />
     <style>
-      /* ─── Section Bar (new component) ──────────────────────────── */
-      .section-bar {
-        position: sticky;
-        top: 57px;
-        z-index: 90;
-        background: rgba(10, 10, 15, 0.85);
-        backdrop-filter: blur(20px) saturate(1.4);
-        -webkit-backdrop-filter: blur(20px) saturate(1.4);
-        border-bottom: 1px solid var(--border);
-        padding: 0.75rem 0;
-        overflow: visible;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-      }
-      .section-bar::-webkit-scrollbar {
-        display: none;
-      }
-      .section-bar-inner {
-        max-width: 1400px;
-        margin: 0 auto;
-        padding: 0 2rem;
-        display: flex;
-        align-items: center;
-        gap: 0.65rem;
-      }
-      .section-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.45rem 0.85rem;
-        background: var(--bg-card);
-        border: 1px solid var(--border);
-        border-radius: 4px;
-        font-family: var(--font-mono);
-        font-size: 0.72rem;
-        font-weight: 500;
-        color: var(--text-secondary);
-        white-space: nowrap;
-        transition: all 0.2s var(--ease-out-expo);
-        text-decoration: none;
-      }
-      .section-pill:hover {
-        color: var(--text-primary);
-        border-color: var(--border-bright);
-        background: var(--bg-card-hover);
-        text-decoration: none;
-        transform: translateY(-1px);
-      }
-      .section-pill.pill-green {
-        border-left: 3px solid var(--accent);
-      }
-      .section-pill.pill-blue {
-        border-left: 3px solid var(--blue);
-      }
-      .section-pill.pill-purple {
-        border-left: 3px solid var(--purple);
-      }
-      .section-pill.pill-amber {
-        border-left: 3px solid var(--warning);
-      }
-      .section-pill.pill-red {
-        border-left: 3px solid var(--error);
-      }
-      .section-pill.pill-gray {
-        border-left: 3px solid var(--text-dim);
-      }
-      .section-pill-icon {
-        font-size: 0.85rem;
-        line-height: 1;
-      }
-
       /* ─── Suite Cards Grid (new component) ─────────────────────── */
       .suite-grid {
         display: grid;
@@ -226,9 +154,6 @@
         .quick-start-paths {
           grid-template-columns: 1fr;
         }
-        .section-bar-inner {
-          padding: 0 1rem;
-        }
       }
     </style>
   </head>
@@ -262,30 +187,6 @@
         </ul>
       </div>
     </nav>
-
-    <!-- ═══ Section Bar ══════════════════════════════════════════════ -->
-    <div class="section-bar">
-      <div class="section-bar-inner">
-        <a href="/chat-completions" class="section-pill pill-green">
-          <span class="section-pill-icon">&#128225;</span> LLM Mocking
-        </a>
-        <a href="/mcp-mock" class="section-pill pill-blue">
-          <span class="section-pill-icon">&#128268;</span> MCP Protocol
-        </a>
-        <a href="/a2a-mock" class="section-pill pill-purple">
-          <span class="section-pill-icon">&#129309;</span> A2A Protocol
-        </a>
-        <a href="/vector-mock" class="section-pill pill-amber">
-          <span class="section-pill-icon">&#128230;</span> Vector DBs
-        </a>
-        <a href="/services" class="section-pill pill-red">
-          <span class="section-pill-icon">&#128269;</span> Search &amp; Rerank
-        </a>
-        <a href="/chaos-testing" class="section-pill pill-gray">
-          <span class="section-pill-icon">&#9881;</span> Chaos &amp; DevOps
-        </a>
-      </div>
-    </div>
 
     <div class="docs-layout">
       <!-- ═══ Sidebar ═══════════════════════════════════════════════ -->
@@ -349,6 +250,21 @@
               <li><a href="/a2a-mock">Task streaming</a></li>
             </ul>
             <a href="/a2a-mock" class="suite-card-cta">Get started <span>&rarr;</span></a>
+          </div>
+
+          <!-- AG-UI Protocol -->
+          <div class="suite-card border-purple">
+            <div class="suite-card-header">
+              <span class="suite-card-icon">&#129502;</span>
+              <span class="suite-card-title">AG-UI Protocol</span>
+            </div>
+            <p class="suite-card-desc">Mock agent-to-UI event streams for frontend testing</p>
+            <ul class="suite-card-links">
+              <li><a href="/agui-mock">Event types</a></li>
+              <li><a href="/agui-mock">Builders</a></li>
+              <li><a href="/agui-mock">Record &amp; replay</a></li>
+            </ul>
+            <a href="/agui-mock" class="suite-card-cta">Get started <span>&rarr;</span></a>
           </div>
 
           <!-- Vector Databases -->
