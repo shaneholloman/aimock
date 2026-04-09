@@ -2,9 +2,32 @@ name: Drift Tests
 on:
   schedule:
     - cron: "0 6 * * *" # Daily 6am UTC
+  pull_request:
+    paths:
+      - "src/agui-types.ts"
+      - "src/__tests__/drift/agui-schema.drift.ts"
   workflow_dispatch: # Manual trigger
 jobs:
+  agui-schema-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Clone ag-ui repo
+        run: git clone --depth 1 https://github.com/ag-ui-protocol/ag-ui.git ../ag-ui
+
+      - name: Run AG-UI schema drift test
+        run: npx vitest run src/__tests__/drift/agui-schema.drift.ts --config vitest.config.drift.ts
+
   drift:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

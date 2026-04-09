@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AG-UI Mock — aimock</title>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <nav class="top-nav">
+      <div class="nav-inner">
+        <div style="display: flex; align-items: center; gap: 1rem">
+          <button
+            class="sidebar-toggle"
+            onclick="document.querySelector('.sidebar').classList.toggle('open')"
+            aria-label="Toggle sidebar"
+          >
+            &#9776;
+          </button>
+          <a href="/" class="nav-brand"> <span class="prompt">$</span> aimock </a>
+        </div>
+        <ul class="nav-links">
+          <li><a href="/">Home</a></li>
+          <li><a href="/docs" style="color: var(--accent)">Docs</a></li>
+          <li>
+            <a href="https://github.com/CopilotKit/aimock" class="gh-link" target="_blank"
+              ><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path
+                  d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+                />
+              </svg>
+              GitHub</a
+            >
+          </li>
+        </ul>
+      </div>
+    </nav>
+
+    <div class="docs-layout">
+      <aside class="sidebar" id="sidebar"></aside>
+
+      <main class="docs-content">
+        <h1>AGUIMock</h1>
+        <p class="lead">
+          Mock the AG-UI (Agent-to-UI) protocol for CopilotKit frontend testing. Point your frontend
+          at aimock instead of a real agent backend and get deterministic SSE event streams from
+          fixtures.
+        </p>
+
+        <h2>Quick Start</h2>
+        <div class="code-block">
+          <div class="code-block-header">
+            Standalone mode <span class="lang-tag">typescript</span>
+          </div>
+          <pre><code><span class="kw">import</span> { AGUIMock } <span class="kw">from</span> <span class="str">"@copilotkit/aimock"</span>;
+
+<span class="kw">const</span> agui = <span class="kw">new</span> AGUIMock();
+agui.<span class="fn">onMessage</span>(<span class="str">"hello"</span>, <span class="str">"Hi! How can I help?"</span>);
+agui.<span class="fn">onToolCall</span>(<span class="op">/search/</span>, <span class="str">"web_search"</span>, <span class="str">'{"q":"test"}'</span>, { <span class="prop">result</span>: <span class="str">"[]"</span> });
+
+<span class="kw">const</span> url = <span class="kw">await</span> agui.<span class="fn">start</span>();
+<span class="cm">// POST to url with RunAgentInput body</span></code></pre>
+        </div>
+
+        <h2>How It Works</h2>
+        <ol>
+          <li>Client sends POST with <code>RunAgentInput</code> JSON body</li>
+          <li>AGUIMock matches the request against registered fixtures</li>
+          <li>On match: streams back AG-UI events as SSE</li>
+          <li>On miss with recording enabled: proxies to upstream, records events</li>
+          <li>On miss without recording: returns 404</li>
+        </ol>
+
+        <h2>Registration API</h2>
+        <p>Fluent methods for registering fixture responses:</p>
+        <table class="endpoint-table">
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Match on</th>
+              <th>Response</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>onMessage(pattern, text)</code></td>
+              <td>Last user message</td>
+              <td>Text response events</td>
+            </tr>
+            <tr>
+              <td><code>onRun(pattern, events)</code></td>
+              <td>Last user message</td>
+              <td>Raw event sequence</td>
+            </tr>
+            <tr>
+              <td><code>onToolCall(pattern, name, args, opts?)</code></td>
+              <td>Last user message</td>
+              <td>Tool call events</td>
+            </tr>
+            <tr>
+              <td><code>onStateKey(key, snapshot)</code></td>
+              <td>State key presence</td>
+              <td>State snapshot</td>
+            </tr>
+            <tr>
+              <td><code>onReasoning(pattern, text)</code></td>
+              <td>Last user message</td>
+              <td>Reasoning events</td>
+            </tr>
+            <tr>
+              <td><code>onPredicate(fn, events)</code></td>
+              <td>Custom function</td>
+              <td>Raw event sequence</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Event Types</h2>
+        <p>AG-UI protocol event categories:</p>
+        <table class="endpoint-table">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Events</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Lifecycle</td>
+              <td>
+                <code>RUN_STARTED</code>, <code>RUN_FINISHED</code>, <code>RUN_ERROR</code>,
+                <code>STEP_STARTED</code>, <code>STEP_FINISHED</code>
+              </td>
+              <td>Run management</td>
+            </tr>
+            <tr>
+              <td>Text</td>
+              <td>
+                <code>TEXT_MESSAGE_START</code>, <code>TEXT_MESSAGE_CONTENT</code>,
+                <code>TEXT_MESSAGE_END</code>, <code>TEXT_MESSAGE_CHUNK</code>
+              </td>
+              <td>Streaming text</td>
+            </tr>
+            <tr>
+              <td>Tool Calls</td>
+              <td>
+                <code>TOOL_CALL_START</code>, <code>TOOL_CALL_ARGS</code>,
+                <code>TOOL_CALL_END</code>, <code>TOOL_CALL_RESULT</code>
+              </td>
+              <td>Tool execution</td>
+            </tr>
+            <tr>
+              <td>State</td>
+              <td>
+                <code>STATE_SNAPSHOT</code>, <code>STATE_DELTA</code>,
+                <code>MESSAGES_SNAPSHOT</code>
+              </td>
+              <td>Frontend state sync</td>
+            </tr>
+            <tr>
+              <td>Activity</td>
+              <td><code>ACTIVITY_SNAPSHOT</code>, <code>ACTIVITY_DELTA</code></td>
+              <td>Progress indicators</td>
+            </tr>
+            <tr>
+              <td>Reasoning</td>
+              <td><code>REASONING_START</code>, ..., <code>REASONING_END</code></td>
+              <td>Chain of thought</td>
+            </tr>
+            <tr>
+              <td>Special</td>
+              <td><code>RAW</code>, <code>CUSTOM</code></td>
+              <td>Extensibility</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Event Builders</h2>
+        <p>Convenience functions for constructing event sequences:</p>
+        <table class="endpoint-table">
+          <thead>
+            <tr>
+              <th>Builder</th>
+              <th>Returns</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>buildTextResponse(text)</code></td>
+              <td>Full text response with lifecycle</td>
+            </tr>
+            <tr>
+              <td><code>buildToolCallResponse(name, args)</code></td>
+              <td>Tool call with optional result</td>
+            </tr>
+            <tr>
+              <td><code>buildStateUpdate(snapshot)</code></td>
+              <td>State snapshot</td>
+            </tr>
+            <tr>
+              <td><code>buildStateDelta(patches)</code></td>
+              <td>JSON Patch incremental update</td>
+            </tr>
+            <tr>
+              <td><code>buildErrorResponse(message)</code></td>
+              <td>Error termination</td>
+            </tr>
+            <tr>
+              <td><code>buildCompositeResponse(outputs[])</code></td>
+              <td>Multiple builders merged</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Record &amp; Replay</h2>
+        <p>
+          Record mode proxies unmatched requests to an upstream agent, saves the event stream as a
+          fixture, and replays it on subsequent matches. Proxy-only mode forwards every time without
+          saving, ideal for demos mixing canned and live scenarios.
+        </p>
+        <div class="code-block">
+          <div class="code-block-header">
+            Recording setup <span class="lang-tag">typescript</span>
+          </div>
+          <pre><code><span class="kw">const</span> agui = <span class="kw">new</span> AGUIMock();
+agui.<span class="fn">onMessage</span>(<span class="str">"hello"</span>, <span class="str">"Hi!"</span>); <span class="cm">// known scenario</span>
+agui.<span class="fn">enableRecording</span>({
+  upstream: <span class="str">"http://localhost:8000/agent"</span>,
+  proxyOnly: <span class="kw">true</span>, <span class="cm">// false to save fixtures</span>
+});</code></pre>
+        </div>
+
+        <h2>CLI Usage</h2>
+        <div class="code-block">
+          <div class="code-block-header">CLI flags <span class="lang-tag">shell</span></div>
+          <pre><code>npx aimock --fixtures ./fixtures \
+  --agui-record \
+  --agui-upstream http://localhost:8000/agent</code></pre>
+        </div>
+        <p>
+          Flags: <code>--agui-record</code>, <code>--agui-upstream</code>,
+          <code>--agui-proxy-only</code>
+        </p>
+
+        <h2>JSON Config</h2>
+        <div class="code-block">
+          <div class="code-block-header">aimock.json <span class="lang-tag">json</span></div>
+          <pre><code>{
+  <span class="prop">"agui"</span>: {
+    <span class="prop">"path"</span>: <span class="str">"/agui"</span>,
+    <span class="prop">"fixtures"</span>: [
+      { <span class="prop">"match"</span>: { <span class="prop">"message"</span>: <span class="str">"hello"</span> }, <span class="prop">"text"</span>: <span class="str">"Hi!"</span> }
+    ]
+  }
+}</code></pre>
+        </div>
+
+        <h2>Mounting</h2>
+        <p>
+          AGUIMock implements <code>Mountable</code> and can be mounted at any path on an LLMock
+          server via <code>llm.mount("/agui", agui)</code>. See
+          <a href="/mount">Mount &amp; Composition</a> for details.
+        </p>
+      </main>
+      <aside class="page-toc" id="page-toc"></aside>
+    </div>
+    <footer class="docs-footer">
+      <div class="footer-inner">
+        <div class="footer-left"><span>$</span> aimock &middot; MIT License</div>
+        <ul class="footer-links">
+          <li><a href="https://github.com/CopilotKit/aimock" target="_blank">GitHub</a></li>
+          <li>
+            <a href="https://www.npmjs.com/package/@copilotkit/aimock" target="_blank">npm</a>
+          </li>
+        </ul>
+      </div>
+    </footer>
+    <script src="../sidebar.js"></script>
+    <script src="../cli-tabs.js"></script>
+  </body>
+</html>
