@@ -3,9 +3,11 @@ import * as path from "node:path";
 import { LLMock } from "./llmock.js";
 import { MCPMock } from "./mcp-mock.js";
 import { A2AMock } from "./a2a-mock.js";
+import { AGUIMock } from "./agui-mock.js";
 import type { ChaosConfig, RecordConfig } from "./types.js";
 import type { MCPToolDefinition, MCPPromptDefinition } from "./mcp-types.js";
 import type { A2AAgentDefinition, A2APart, A2AArtifact, A2AStreamEvent } from "./a2a-types.js";
+import type { AGUIEvent } from "./agui-types.js";
 import { VectorMock } from "./vector-mock.js";
 import type { QueryResult } from "./vector-types.js";
 import { Logger } from "./logger.js";
@@ -56,6 +58,18 @@ export interface A2AConfig {
   agents?: A2AConfigAgent[];
 }
 
+export interface AGUIConfigFixture {
+  match: { message?: string; toolName?: string; stateKey?: string };
+  text?: string; // shorthand: uses buildTextResponse
+  events?: AGUIEvent[]; // raw events
+  delayMs?: number;
+}
+
+export interface AGUIConfig {
+  path?: string; // mount path, default "/agui"
+  fixtures?: AGUIConfigFixture[];
+}
+
 export interface VectorConfigCollection {
   name: string;
   dimension: number;
@@ -80,6 +94,7 @@ export interface AimockConfig {
   };
   mcp?: MCPConfig;
   a2a?: A2AConfig;
+  agui?: AGUIConfig;
   vector?: VectorConfig;
   services?: { search?: boolean; rerank?: boolean; moderate?: boolean };
   metrics?: boolean;
@@ -196,6 +211,38 @@ export async function startFromConfig(
     const a2aPath = a2aConfig.path ?? "/a2a";
     llmock.mount(a2aPath, a2a);
     logger.info(`A2AMock mounted at ${a2aPath}`);
+  }
+
+  // AG-UI
+  if (config.agui) {
+    const aguiConfig = config.agui;
+    const agui = new AGUIMock();
+
+    if (aguiConfig.fixtures) {
+      for (const f of aguiConfig.fixtures) {
+        if (f.text) {
+          agui.onMessage(f.match.message ?? /.*/, f.text, { delayMs: f.delayMs });
+        } else if (f.events) {
+          agui.addFixture({
+            match: {
+              message: f.match.message,
+              toolName: f.match.toolName,
+              stateKey: f.match.stateKey,
+            },
+            events: f.events,
+            delayMs: f.delayMs,
+          });
+        } else {
+          logger.warn(
+            `AG-UI fixture has neither text nor events — it will be skipped (match: ${JSON.stringify(f.match)})`,
+          );
+        }
+      }
+    }
+
+    const aguiPath = aguiConfig.path ?? "/agui";
+    llmock.mount(aguiPath, agui);
+    logger.info(`AGUIMock mounted at ${aguiPath}`);
   }
 
   // Vector
