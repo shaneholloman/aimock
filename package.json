@@ -1,8 +1,40 @@
 {
   "name": "@copilotkit/aimock",
-  "version": "1.12.0",
-  "description": "Mock infrastructure for AI application testing — LLM APIs, MCP tools, A2A agents, AG-UI event streams, vector databases, search, and more. Zero dependencies.",
+  "version": "1.13.0",
+  "description": "Mock infrastructure for AI application testing — LLM APIs, image generation, text-to-speech, transcription, video generation, MCP tools, A2A agents, AG-UI event streams, vector databases, search, rerank, and moderation. One package, one port, zero dependencies.",
   "license": "MIT",
+  "keywords": [
+    "mock",
+    "llm",
+    "openai",
+    "anthropic",
+    "claude",
+    "gemini",
+    "bedrock",
+    "azure-openai",
+    "ollama",
+    "cohere",
+    "vertex-ai",
+    "mcp",
+    "a2a",
+    "ag-ui",
+    "vector",
+    "pinecone",
+    "qdrant",
+    "chromadb",
+    "testing",
+    "fixtures",
+    "sse",
+    "streaming",
+    "websocket",
+    "record-replay",
+    "drift-detection",
+    "ai-testing",
+    "api-mock",
+    "http-mock",
+    "embeddings",
+    "copilotkit"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/CopilotKit/aimock"
@@ -52,6 +84,26 @@
         "types": "./dist/vector-stub.d.cts",
         "default": "./dist/vector-stub.cjs"
       }
+    },
+    "./vitest": {
+      "import": {
+        "types": "./dist/vitest.d.ts",
+        "default": "./dist/vitest.js"
+      },
+      "require": {
+        "types": "./dist/vitest.d.cts",
+        "default": "./dist/vitest.cjs"
+      }
+    },
+    "./jest": {
+      "import": {
+        "types": "./dist/jest.d.ts",
+        "default": "./dist/jest.js"
+      },
+      "require": {
+        "types": "./dist/jest.d.cts",
+        "default": "./dist/jest.cjs"
+      }
     }
   },
   "main": "./dist/index.cjs",
@@ -67,6 +119,12 @@
       ],
       "vector": [
         "./dist/vector-stub.d.ts"
+      ],
+      "vitest": [
+        "./dist/vitest.d.ts"
+      ],
+      "jest": [
+        "./dist/jest.d.ts"
       ]
     }
   },
