@@ -280,6 +280,59 @@ $ docker run -p 4010:4010 \
           </div>
         </div>
 
+        <h2>Fixture Converters</h2>
+        <p>Convert fixtures from other mock tools to aimock format.</p>
+
+        <h3>Usage</h3>
+        <div class="code-block">
+          <div class="code-block-header">Convert fixtures <span class="lang-tag">shell</span></div>
+          <pre><code>npx aimock convert &lt;format&gt; &lt;input&gt; [output]</code></pre>
+        </div>
+
+        <h3>Supported Formats</h3>
+        <table class="endpoint-table">
+          <thead>
+            <tr>
+              <th>Format</th>
+              <th>Source</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>vidaimock</code></td>
+              <td>VidaiMock Tera templates</td>
+              <td>
+                Converts <code>.tera</code> / <code>.json</code> / <code>.txt</code> templates to
+                aimock fixture JSON
+              </td>
+            </tr>
+            <tr>
+              <td><code>mockllm</code></td>
+              <td>mock-llm YAML config</td>
+              <td>
+                Converts mock-llm YAML configs to aimock fixture JSON. Also extracts MCP tools if
+                present.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Examples</h3>
+        <div class="code-block">
+          <div class="code-block-header">
+            Converter examples <span class="lang-tag">shell</span>
+          </div>
+          <pre><code><span class="cm"># Convert a directory of VidaiMock templates</span>
+$ npx aimock convert vidaimock ./templates/ ./fixtures/converted.json
+
+<span class="cm"># Convert a mock-llm YAML config</span>
+$ npx aimock convert mockllm ./config.yaml ./fixtures/converted.json
+
+<span class="cm"># Print to stdout (omit output path)</span>
+$ npx aimock convert vidaimock ./templates/</code></pre>
+        </div>
+
         <h2>Docker Compose</h2>
 
         <div class="code-block">

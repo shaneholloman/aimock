@@ -1,0 +1,26 @@
+{
+  "mcp": {
+    "tools": [
+      {
+        "name": "search",
+        "description": "Search the web",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string" }
+          },
+          "required": ["query"]
+        },
+        "result": "No results found for the given query."
+      }
+    ],
+    "resources": [
+      {
+        "uri": "file:///readme",
+        "name": "README",
+        "mimeType": "text/plain",
+        "text": "# My Project\n\nThis is the project README."
+      }
+    ]
+  }
+}

@@ -51,7 +51,22 @@ Run them all on one port with `npx aimock --config aimock.json`, or use the prog
 - **[WebSocket APIs](https://aimock.copilotkit.dev/websocket)** — OpenAI Realtime, Responses WS, Gemini Live
 - **[Prometheus Metrics](https://aimock.copilotkit.dev/metrics)** — Request counts, latencies, fixture match rates
 - **[Docker + Helm](https://aimock.copilotkit.dev/docker)** — Container image and Helm chart for CI/CD
+- **[Vitest & Jest Plugins](https://aimock.copilotkit.dev/test-plugins)** — Zero-config `useAimock()` with auto lifecycle and env patching
 - **Zero dependencies** — Everything from Node.js builtins
+
+## GitHub Action
+
+```yaml
+- uses: CopilotKit/aimock@v1
+  with:
+    fixtures: ./test/fixtures
+
+- run: npm test
+  env:
+    OPENAI_BASE_URL: http://127.0.0.1:4010/v1
+```
+
+See the [GitHub Action docs](https://aimock.copilotkit.dev/github-action) for all inputs and examples.
 
 ## CLI
 
@@ -65,6 +80,10 @@ npx aimock --config aimock.json
 # Record mode: proxy to real APIs, save fixtures
 npx aimock --record --provider-openai https://api.openai.com
 
+# Convert fixtures from other tools
+npx aimock convert vidaimock ./templates/ ./fixtures/
+npx aimock convert mockllm ./config.yaml ./fixtures/
+
 # Docker
 docker run -d -p 4010:4010 -v ./fixtures:/fixtures ghcr.io/copilotkit/aimock -f /fixtures
 ```
@@ -75,7 +94,7 @@ Step-by-step migration guides: [MSW](https://aimock.copilotkit.dev/migrate-from-
 
 ## Documentation
 
-**[https://aimock.copilotkit.dev](https://aimock.copilotkit.dev)**
+**[https://aimock.copilotkit.dev](https://aimock.copilotkit.dev)** · [Example fixtures](https://aimock.copilotkit.dev/examples)
 
 ## Real-World Usage
 

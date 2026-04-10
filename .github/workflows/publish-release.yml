@@ -49,6 +49,10 @@ jobs:
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
+      - name: Strip video URLs from README for npm
+        if: steps.check.outputs.published == 'false'
+        run: sed -i '/^https:\/\/github.com\/user-attachments\//d' README.md
+
       - name: Build and publish
         if: steps.check.outputs.published == 'false'
         run: pnpm build && npm publish --access public

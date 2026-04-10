@@ -1,0 +1,35 @@
+{
+  "agui": {
+    "fixtures": [
+      {
+        "match": { "message": "hello" },
+        "text": "Hi! How can I help you today?"
+      },
+      {
+        "match": { "message": "search" },
+        "events": [
+          { "type": "RUN_STARTED", "threadId": "t1", "runId": "r1" },
+          { "type": "TOOL_CALL_START", "toolCallId": "tc1", "toolCallName": "web_search" },
+          {
+            "type": "TOOL_CALL_ARGS",
+            "toolCallId": "tc1",
+            "delta": "{\"query\": \"latest news\"}"
+          },
+          { "type": "TOOL_CALL_END", "toolCallId": "tc1" },
+          {
+            "type": "TEXT_MESSAGE_START",
+            "messageId": "m1",
+            "role": "assistant"
+          },
+          {
+            "type": "TEXT_MESSAGE_CONTENT",
+            "messageId": "m1",
+            "delta": "Here are the latest results..."
+          },
+          { "type": "TEXT_MESSAGE_END", "messageId": "m1" },
+          { "type": "RUN_FINISHED", "threadId": "t1", "runId": "r1" }
+        ]
+      }
+    ]
+  }
+}

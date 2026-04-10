@@ -1,0 +1,10 @@
+{
+  "llm": {
+    "fixtures": "fixtures/example-greeting.json",
+    "chaos": {
+      "dropRate": 0.1,
+      "malformedRate": 0.05,
+      "disconnectRate": 0.02
+    }
+  }
+}

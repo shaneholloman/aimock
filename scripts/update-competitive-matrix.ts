@@ -140,6 +140,20 @@ const FEATURE_RULES: FeatureRule[] = [
     rowLabel: "AG-UI event mocking",
     keywords: ["ag-ui", "agui", "agent-ui", "copilotkit.*frontend", "event stream mock"],
   },
+  {
+    rowLabel: "GitHub Action",
+    keywords: ["github.*action", "action.yml", "uses:.*mock", "ci.*action"],
+  },
+  {
+    rowLabel: "Vitest / Jest plugins",
+    keywords: [
+      "vitest.*plugin",
+      "jest.*plugin",
+      "useAimock",
+      "useMock.*test",
+      "test.*framework.*integrat",
+    ],
+  },
 ];
 
 /** Maps competitor display names to their migration page paths (relative to docs/) */

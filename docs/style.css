@@ -154,7 +154,7 @@ body::before {
   top: 57px; /* nav height */
   left: 0;
   width: var(--sidebar-width);
-  height: calc(100vh - 57px - 50px);
+  height: calc(100vh - 57px);
   overflow-y: auto;
   background: var(--bg-surface);
   border-right: 1px solid var(--border);

@@ -1,0 +1,11 @@
+{
+  "llm": {
+    "record": {
+      "providers": {
+        "openai": "https://api.openai.com/v1",
+        "anthropic": "https://api.anthropic.com"
+      },
+      "fixturePath": "./recorded-fixtures"
+    }
+  }
+}

@@ -1,5 +1,16 @@
 # @copilotkit/aimock
 
+## 1.13.0
+
+### Minor Changes
+
+- Add GitHub Action for one-line CI setup — `uses: CopilotKit/aimock@v1` with fixtures, config, port, args, and health check (#102)
+- Wire fixture converters into CLI — `npx aimock convert vidaimock` and `npx aimock convert mockllm` as first-class subcommands (#102)
+- Add 30 npm keywords for search discoverability (#102)
+- Add fixture gallery with 11 examples covering all mock types, plus browsable docs page at /examples (#102)
+- Add vitest and jest plugins for zero-config testing — `import { useAimock } from "@copilotkit/aimock/vitest"` (#102)
+- Strip video URLs from README for npm publishing (#102)
+
 ## 1.12.0
 
 ### Minor Changes

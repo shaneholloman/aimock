@@ -1,0 +1,42 @@
+{
+  "a2a": {
+    "agents": [
+      {
+        "name": "research-agent",
+        "description": "An agent that researches topics and returns summaries",
+        "version": "1.0.0",
+        "skills": [
+          {
+            "id": "web-research",
+            "name": "Web Research",
+            "description": "Search the web and summarize findings",
+            "tags": ["research", "search"]
+          }
+        ],
+        "capabilities": { "streaming": true },
+        "messages": [
+          {
+            "pattern": "research",
+            "parts": [{ "text": "Here is a summary of my research findings on the topic." }]
+          }
+        ],
+        "streamingTasks": [
+          {
+            "pattern": "deep-research",
+            "events": [
+              { "type": "status", "state": "TASK_STATE_WORKING" },
+              {
+                "type": "artifact",
+                "name": "research-report",
+                "parts": [{ "text": "## Research Report\n\nFindings from deep research..." }],
+                "lastChunk": true
+              },
+              { "type": "status", "state": "TASK_STATE_COMPLETED" }
+            ],
+            "delayMs": 100
+          }
+        ]
+      }
+    ]
+  }
+}

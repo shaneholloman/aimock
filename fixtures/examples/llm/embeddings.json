@@ -1,0 +1,10 @@
+{
+  "fixtures": [
+    {
+      "match": { "inputText": "hello world" },
+      "response": {
+        "embedding": [0.0023064255, -0.009327292, 0.015797347]
+      }
+    }
+  ]
+}

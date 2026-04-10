@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example Fixtures — aimock</title>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <nav class="top-nav">
+      <div class="nav-inner">
+        <div style="display: flex; align-items: center; gap: 1rem">
+          <button
+            class="sidebar-toggle"
+            onclick="document.querySelector('.sidebar').classList.toggle('open')"
+            aria-label="Toggle sidebar"
+          >
+            &#9776;
+          </button>
+          <a href="/" class="nav-brand"> <span class="prompt">$</span> aimock </a>
+        </div>
+        <ul class="nav-links">
+          <li><a href="/">Home</a></li>
+          <li><a href="/docs" style="color: var(--accent)">Docs</a></li>
+          <li>
+            <a href="https://github.com/CopilotKit/aimock" class="gh-link" target="_blank"
+              ><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path
+                  d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+                />
+              </svg>
+              GitHub</a
+            >
+          </li>
+        </ul>
+      </div>
+    </nav>
+
+    <div class="docs-layout">
+      <aside class="sidebar" id="sidebar"></aside>
+
+      <main class="docs-content">
+        <h1>Example Fixtures</h1>
+        <p class="lead">
+          Ready-to-use fixture examples for every mock type. Copy any example to get started
+          quickly, or use <code>fixtures/examples/full-suite.json</code> as a complete config
+          template.
+        </p>
+
+        <!-- ─── LLM Fixtures ───────────────────────────────────────── -->
+
+        <h2>LLM Fixtures</h2>
+
+        <h3>Embeddings</h3>
+        <p>Matching on <code>inputText</code> and returning a vector.</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/llm/embeddings.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"fixtures"</span>: [
+    {
+      <span class="key">"match"</span>: { <span class="key">"inputText"</span>: <span class="str">"hello world"</span> },
+      <span class="key">"response"</span>: {
+        <span class="key">"embedding"</span>: [<span class="num">0.0023064255</span>, <span class="num">-0.009327292</span>, <span class="num">0.015797347</span>]
+      }
+    }
+  ]
+}</code></pre>
+        </div>
+
+        <h3>Streaming Physics</h3>
+        <p>
+          Realistic streaming timing with <code>ttft</code>, <code>tps</code>, and
+          <code>jitter</code>.
+        </p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/llm/streaming-physics.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"fixtures"</span>: [
+    {
+      <span class="key">"match"</span>: { <span class="key">"userMessage"</span>: <span class="str">"explain gravity"</span> },
+      <span class="key">"response"</span>: {
+        <span class="key">"content"</span>: <span class="str">"Gravity is a fundamental force of nature that attracts objects with mass toward one another. It keeps planets in orbit around the sun and holds galaxies together."</span>
+      },
+      <span class="key">"streamingProfile"</span>: {
+        <span class="key">"ttft"</span>: <span class="num">200</span>,
+        <span class="key">"tps"</span>: <span class="num">40</span>,
+        <span class="key">"jitter"</span>: <span class="num">0.1</span>
+      }
+    }
+  ]
+}</code></pre>
+        </div>
+
+        <h3>Error Injection</h3>
+        <p>Rate limit error response for any message.</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/llm/error-injection.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"fixtures"</span>: [
+    {
+      <span class="key">"match"</span>: { <span class="key">"userMessage"</span>: <span class="str">".*"</span> },
+      <span class="key">"response"</span>: {
+        <span class="key">"error"</span>: {
+          <span class="key">"message"</span>: <span class="str">"Rate limit exceeded. Please retry after 30 seconds."</span>,
+          <span class="key">"type"</span>: <span class="str">"rate_limit_error"</span>,
+          <span class="key">"code"</span>: <span class="str">"rate_limit_exceeded"</span>
+        },
+        <span class="key">"status"</span>: <span class="num">429</span>
+      }
+    }
+  ]
+}</code></pre>
+        </div>
+
+        <h3>Sequential Responses</h3>
+        <p>Stateful multi-turn responses using <code>sequenceIndex</code>.</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/llm/sequential-responses.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"fixtures"</span>: [
+    {
+      <span class="key">"match"</span>: { <span class="key">"userMessage"</span>: <span class="str">"tell me a joke"</span>, <span class="key">"sequenceIndex"</span>: <span class="num">0</span> },
+      <span class="key">"response"</span>: {
+        <span class="key">"content"</span>: <span class="str">"Why did the programmer quit his job? Because he didn't get arrays!"</span>
+      }
+    },
+    {
+      <span class="key">"match"</span>: { <span class="key">"userMessage"</span>: <span class="str">"tell me a joke"</span>, <span class="key">"sequenceIndex"</span>: <span class="num">1</span> },
+      <span class="key">"response"</span>: { <span class="key">"content"</span>: <span class="str">"Why do Java developers wear glasses? Because they can't C#!"</span> }
+    },
+    {
+      <span class="key">"match"</span>: { <span class="key">"userMessage"</span>: <span class="str">"tell me a joke"</span>, <span class="key">"sequenceIndex"</span>: <span class="num">2</span> },
+      <span class="key">"response"</span>: {
+        <span class="key">"content"</span>: <span class="str">"A SQL query walks into a bar, sees two tables, and asks: 'Can I join you?'"</span>
+      }
+    }
+  ]
+}</code></pre>
+        </div>
+
+        <!-- ─── Protocol Configs ───────────────────────────────────── -->
+
+        <h2>Protocol Configs</h2>
+
+        <h3>MCP</h3>
+        <p>Tools and resources for the Model Context Protocol mock.</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/mcp/mcp-config.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"mcp"</span>: {
+    <span class="key">"tools"</span>: [
+      {
+        <span class="key">"name"</span>: <span class="str">"search"</span>,
+        <span class="key">"description"</span>: <span class="str">"Search the web"</span>,
+        <span class="key">"inputSchema"</span>: {
+          <span class="key">"type"</span>: <span class="str">"object"</span>,
+          <span class="key">"properties"</span>: {
+            <span class="key">"query"</span>: { <span class="key">"type"</span>: <span class="str">"string"</span> }
+          },
+          <span class="key">"required"</span>: [<span class="str">"query"</span>]
+        },
+        <span class="key">"result"</span>: <span class="str">"No results found for the given query."</span>
+      }
+    ],
+    <span class="key">"resources"</span>: [
+      {
+        <span class="key">"uri"</span>: <span class="str">"file:///readme"</span>,
+        <span class="key">"name"</span>: <span class="str">"README"</span>,
+        <span class="key">"mimeType"</span>: <span class="str">"text/plain"</span>,
+        <span class="key">"text"</span>: <span class="str">"# My Project\n\nThis is the project README."</span>
+      }
+    ]
+  }
+}</code></pre>
+        </div>
+
+        <h3>A2A</h3>
+        <p>Agent registration and streaming tasks for the Agent-to-Agent protocol mock.</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/a2a/a2a-config.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"a2a"</span>: {
+    <span class="key">"agents"</span>: [
+      {
+        <span class="key">"name"</span>: <span class="str">"research-agent"</span>,
+        <span class="key">"description"</span>: <span class="str">"An agent that researches topics and returns summaries"</span>,
+        <span class="key">"version"</span>: <span class="str">"1.0.0"</span>,
+        <span class="key">"skills"</span>: [
+          {
+            <span class="key">"id"</span>: <span class="str">"web-research"</span>,
+            <span class="key">"name"</span>: <span class="str">"Web Research"</span>,
+            <span class="key">"description"</span>: <span class="str">"Search the web and summarize findings"</span>,
+            <span class="key">"tags"</span>: [<span class="str">"research"</span>, <span class="str">"search"</span>]
+          }
+        ],
+        <span class="key">"capabilities"</span>: { <span class="key">"streaming"</span>: <span class="kw">true</span> },
+        <span class="key">"messages"</span>: [
+          {
+            <span class="key">"pattern"</span>: <span class="str">"research"</span>,
+            <span class="key">"parts"</span>: [{ <span class="key">"text"</span>: <span class="str">"Here is a summary of my research findings on the topic."</span> }]
+          }
+        ],
+        <span class="key">"streamingTasks"</span>: [
+          {
+            <span class="key">"pattern"</span>: <span class="str">"deep-research"</span>,
+            <span class="key">"events"</span>: [
+              { <span class="key">"type"</span>: <span class="str">"status"</span>, <span class="key">"state"</span>: <span class="str">"TASK_STATE_WORKING"</span> },
+              {
+                <span class="key">"type"</span>: <span class="str">"artifact"</span>,
+                <span class="key">"name"</span>: <span class="str">"research-report"</span>,
+                <span class="key">"parts"</span>: [{ <span class="key">"text"</span>: <span class="str">"## Research Report\n\nFindings from deep research..."</span> }],
+                <span class="key">"lastChunk"</span>: <span class="kw">true</span>
+              },
+              { <span class="key">"type"</span>: <span class="str">"status"</span>, <span class="key">"state"</span>: <span class="str">"TASK_STATE_COMPLETED"</span> }
+            ],
+            <span class="key">"delayMs"</span>: <span class="num">100</span>
+          }
+        ]
+      }
+    ]
+  }
+}</code></pre>
+        </div>
+
+        <h3>AG-UI</h3>
+        <p>Text response and tool call event stream for the AG-UI protocol mock.</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/agui/agui-text-response.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"agui"</span>: {
+    <span class="key">"fixtures"</span>: [
+      {
+        <span class="key">"match"</span>: { <span class="key">"message"</span>: <span class="str">"hello"</span> },
+        <span class="key">"text"</span>: <span class="str">"Hi! How can I help you today?"</span>
+      },
+      {
+        <span class="key">"match"</span>: { <span class="key">"message"</span>: <span class="str">"search"</span> },
+        <span class="key">"events"</span>: [
+          { <span class="key">"type"</span>: <span class="str">"RUN_STARTED"</span>, <span class="key">"threadId"</span>: <span class="str">"t1"</span>, <span class="key">"runId"</span>: <span class="str">"r1"</span> },
+          { <span class="key">"type"</span>: <span class="str">"TOOL_CALL_START"</span>, <span class="key">"toolCallId"</span>: <span class="str">"tc1"</span>, <span class="key">"toolCallName"</span>: <span class="str">"web_search"</span> },
+          {
+            <span class="key">"type"</span>: <span class="str">"TOOL_CALL_ARGS"</span>,
+            <span class="key">"toolCallId"</span>: <span class="str">"tc1"</span>,
+            <span class="key">"delta"</span>: <span class="str">"{\"query\": \"latest news\"}"</span>
+          },
+          { <span class="key">"type"</span>: <span class="str">"TOOL_CALL_END"</span>, <span class="key">"toolCallId"</span>: <span class="str">"tc1"</span> },
+          {
+            <span class="key">"type"</span>: <span class="str">"TEXT_MESSAGE_START"</span>,
+            <span class="key">"messageId"</span>: <span class="str">"m1"</span>,
+            <span class="key">"role"</span>: <span class="str">"assistant"</span>
+          },
+          {
+            <span class="key">"type"</span>: <span class="str">"TEXT_MESSAGE_CONTENT"</span>,
+            <span class="key">"messageId"</span>: <span class="str">"m1"</span>,
+            <span class="key">"delta"</span>: <span class="str">"Here are the latest results..."</span>
+          },
+          { <span class="key">"type"</span>: <span class="str">"TEXT_MESSAGE_END"</span>, <span class="key">"messageId"</span>: <span class="str">"m1"</span> },
+          { <span class="key">"type"</span>: <span class="str">"RUN_FINISHED"</span>, <span class="key">"threadId"</span>: <span class="str">"t1"</span>, <span class="key">"runId"</span>: <span class="str">"r1"</span> }
+        ]
+      }
+    ]
+  }
+}</code></pre>
+        </div>
+
+        <h3>Vector</h3>
+        <p>Collection with vectors and query results for the vector database mock.</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/vector/vector-config.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"vector"</span>: {
+    <span class="key">"collections"</span>: [
+      {
+        <span class="key">"name"</span>: <span class="str">"documents"</span>,
+        <span class="key">"dimension"</span>: <span class="num">3</span>,
+        <span class="key">"vectors"</span>: [
+          {
+            <span class="key">"id"</span>: <span class="str">"doc-1"</span>,
+            <span class="key">"values"</span>: [<span class="num">0.1</span>, <span class="num">0.2</span>, <span class="num">0.3</span>],
+            <span class="key">"metadata"</span>: { <span class="key">"title"</span>: <span class="str">"Getting Started"</span>, <span class="key">"category"</span>: <span class="str">"tutorial"</span> }
+          },
+          {
+            <span class="key">"id"</span>: <span class="str">"doc-2"</span>,
+            <span class="key">"values"</span>: [<span class="num">0.4</span>, <span class="num">0.5</span>, <span class="num">0.6</span>],
+            <span class="key">"metadata"</span>: { <span class="key">"title"</span>: <span class="str">"API Reference"</span>, <span class="key">"category"</span>: <span class="str">"reference"</span> }
+          }
+        ],
+        <span class="key">"queryResults"</span>: [
+          {
+            <span class="key">"id"</span>: <span class="str">"doc-1"</span>,
+            <span class="key">"score"</span>: <span class="num">0.95</span>,
+            <span class="key">"metadata"</span>: { <span class="key">"title"</span>: <span class="str">"Getting Started"</span>, <span class="key">"category"</span>: <span class="str">"tutorial"</span> }
+          },
+          {
+            <span class="key">"id"</span>: <span class="str">"doc-2"</span>,
+            <span class="key">"score"</span>: <span class="num">0.82</span>,
+            <span class="key">"metadata"</span>: { <span class="key">"title"</span>: <span class="str">"API Reference"</span>, <span class="key">"category"</span>: <span class="str">"reference"</span> }
+          }
+        ]
+      }
+    ]
+  }
+}</code></pre>
+        </div>
+
+        <!-- ─── Testing & Operations ───────────────────────────────── -->
+
+        <h2>Testing &amp; Operations</h2>
+
+        <h3>Chaos Testing</h3>
+        <p>Configure drop, malformed, and disconnect rates for chaos testing.</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/chaos/chaos-config.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"llm"</span>: {
+    <span class="key">"fixtures"</span>: <span class="str">"fixtures/example-greeting.json"</span>,
+    <span class="key">"chaos"</span>: {
+      <span class="key">"dropRate"</span>: <span class="num">0.1</span>,
+      <span class="key">"malformedRate"</span>: <span class="num">0.05</span>,
+      <span class="key">"disconnectRate"</span>: <span class="num">0.02</span>
+    }
+  }
+}</code></pre>
+        </div>
+
+        <h3>Record &amp; Replay</h3>
+        <p>Provider URLs for proxy mode to record live API traffic.</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/record-replay/record-config.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"llm"</span>: {
+    <span class="key">"record"</span>: {
+      <span class="key">"providers"</span>: {
+        <span class="key">"openai"</span>: <span class="str">"https://api.openai.com/v1"</span>,
+        <span class="key">"anthropic"</span>: <span class="str">"https://api.anthropic.com"</span>
+      },
+      <span class="key">"fixturePath"</span>: <span class="str">"./recorded-fixtures"</span>
+    }
+  }
+}</code></pre>
+        </div>
+
+        <!-- ─── Full Suite ─────────────────────────────────────────── -->
+
+        <h2>Full Suite</h2>
+
+        <h3>Complete Config</h3>
+        <p>A complete configuration running all mocks on one port.</p>
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/examples/full-suite.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"port"</span>: <span class="num">4000</span>,
+  <span class="key">"host"</span>: <span class="str">"127.0.0.1"</span>,
+  <span class="key">"metrics"</span>: <span class="kw">true</span>,
+  <span class="key">"strict"</span>: <span class="kw">true</span>,
+
+  <span class="key">"llm"</span>: {
+    <span class="key">"fixtures"</span>: <span class="str">"fixtures/example-greeting.json"</span>,
+    <span class="key">"chaos"</span>: {
+      <span class="key">"dropRate"</span>: <span class="num">0.01</span>,
+      <span class="key">"malformedRate"</span>: <span class="num">0.005</span>,
+      <span class="key">"disconnectRate"</span>: <span class="num">0.002</span>
+    }
+  },
+
+  <span class="key">"mcp"</span>: {
+    <span class="key">"serverInfo"</span>: { <span class="key">"name"</span>: <span class="str">"full-suite-mcp"</span>, <span class="key">"version"</span>: <span class="str">"1.0.0"</span> },
+    <span class="key">"tools"</span>: [
+      {
+        <span class="key">"name"</span>: <span class="str">"search"</span>,
+        <span class="key">"description"</span>: <span class="str">"Search the knowledge base"</span>,
+        <span class="key">"inputSchema"</span>: {
+          <span class="key">"type"</span>: <span class="str">"object"</span>,
+          <span class="key">"properties"</span>: {
+            <span class="key">"query"</span>: { <span class="key">"type"</span>: <span class="str">"string"</span> },
+            <span class="key">"limit"</span>: { <span class="key">"type"</span>: <span class="str">"number"</span> }
+          },
+          <span class="key">"required"</span>: [<span class="str">"query"</span>]
+        },
+        <span class="key">"result"</span>: <span class="str">"Found 3 results for your query."</span>
+      }
+    ],
+    <span class="key">"resources"</span>: [
+      {
+        <span class="key">"uri"</span>: <span class="str">"file:///config"</span>,
+        <span class="key">"name"</span>: <span class="str">"Configuration"</span>,
+        <span class="key">"mimeType"</span>: <span class="str">"application/json"</span>,
+        <span class="key">"text"</span>: <span class="str">"{\"version\": \"1.0\", \"environment\": \"test\"}"</span>
+      }
+    ],
+    <span class="key">"prompts"</span>: [
+      {
+        <span class="key">"name"</span>: <span class="str">"summarize"</span>,
+        <span class="key">"description"</span>: <span class="str">"Summarize a document"</span>,
+        <span class="key">"arguments"</span>: [{ <span class="key">"name"</span>: <span class="str">"text"</span>, <span class="key">"description"</span>: <span class="str">"The text to summarize"</span>, <span class="key">"required"</span>: <span class="kw">true</span> }],
+        <span class="key">"result"</span>: {
+          <span class="key">"messages"</span>: [
+            {
+              <span class="key">"role"</span>: <span class="str">"assistant"</span>,
+              <span class="key">"content"</span>: { <span class="key">"type"</span>: <span class="str">"text"</span>, <span class="key">"text"</span>: <span class="str">"Here is a summary of the provided text."</span> }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  <span class="key">"a2a"</span>: {
+    <span class="key">"agents"</span>: [
+      {
+        <span class="key">"name"</span>: <span class="str">"assistant"</span>,
+        <span class="key">"description"</span>: <span class="str">"A general-purpose assistant agent"</span>,
+        <span class="key">"version"</span>: <span class="str">"1.0.0"</span>,
+        <span class="key">"skills"</span>: [{ <span class="key">"id"</span>: <span class="str">"qa"</span>, <span class="key">"name"</span>: <span class="str">"Q&amp;A"</span>, <span class="key">"description"</span>: <span class="str">"Answer questions"</span> }],
+        <span class="key">"capabilities"</span>: { <span class="key">"streaming"</span>: <span class="kw">true</span> },
+        <span class="key">"messages"</span>: [
+          {
+            <span class="key">"pattern"</span>: <span class="str">".*"</span>,
+            <span class="key">"parts"</span>: [{ <span class="key">"text"</span>: <span class="str">"I can help you with that."</span> }]
+          }
+        ]
+      }
+    ]
+  },
+
+  <span class="key">"agui"</span>: {
+    <span class="key">"fixtures"</span>: [
+      {
+        <span class="key">"match"</span>: { <span class="key">"message"</span>: <span class="str">"hello"</span> },
+        <span class="key">"text"</span>: <span class="str">"Hello from the full-suite mock!"</span>
+      },
+      {
+        <span class="key">"match"</span>: { <span class="key">"toolName"</span>: <span class="str">"get_data"</span> },
+        <span class="key">"events"</span>: [
+          { <span class="key">"type"</span>: <span class="str">"RUN_STARTED"</span>, <span class="key">"threadId"</span>: <span class="str">"t1"</span>, <span class="key">"runId"</span>: <span class="str">"r1"</span> },
+          { <span class="key">"type"</span>: <span class="str">"TOOL_CALL_START"</span>, <span class="key">"toolCallId"</span>: <span class="str">"tc1"</span>, <span class="key">"toolCallName"</span>: <span class="str">"get_data"</span> },
+          { <span class="key">"type"</span>: <span class="str">"TOOL_CALL_ARGS"</span>, <span class="key">"toolCallId"</span>: <span class="str">"tc1"</span>, <span class="key">"delta"</span>: <span class="str">"{}"</span> },
+          { <span class="key">"type"</span>: <span class="str">"TOOL_CALL_END"</span>, <span class="key">"toolCallId"</span>: <span class="str">"tc1"</span> },
+          { <span class="key">"type"</span>: <span class="str">"RUN_FINISHED"</span>, <span class="key">"threadId"</span>: <span class="str">"t1"</span>, <span class="key">"runId"</span>: <span class="str">"r1"</span> }
+        ]
+      }
+    ]
+  },
+
+  <span class="key">"vector"</span>: {
+    <span class="key">"collections"</span>: [
+      {
+        <span class="key">"name"</span>: <span class="str">"knowledge-base"</span>,
+        <span class="key">"dimension"</span>: <span class="num">384</span>,
+        <span class="key">"queryResults"</span>: [
+          {
+            <span class="key">"id"</span>: <span class="str">"kb-001"</span>,
+            <span class="key">"score"</span>: <span class="num">0.97</span>,
+            <span class="key">"metadata"</span>: { <span class="key">"source"</span>: <span class="str">"docs"</span>, <span class="key">"title"</span>: <span class="str">"Quick Start Guide"</span> }
+          }
+        ]
+      }
+    ]
+  },
+
+  <span class="key">"services"</span>: {
+    <span class="key">"search"</span>: <span class="kw">true</span>,
+    <span class="key">"rerank"</span>: <span class="kw">true</span>,
+    <span class="key">"moderate"</span>: <span class="kw">true</span>
+  }
+}</code></pre>
+        </div>
+      </main>
+      <aside class="page-toc" id="page-toc"></aside>
+    </div>
+    <footer class="docs-footer">
+      <div class="footer-inner">
+        <div class="footer-left"><span>$</span> aimock &middot; MIT License</div>
+        <ul class="footer-links">
+          <li><a href="https://github.com/CopilotKit/aimock" target="_blank">GitHub</a></li>
+          <li>
+            <a href="https://www.npmjs.com/package/@copilotkit/aimock" target="_blank">npm</a>
+          </li>
+        </ul>
+      </div>
+    </footer>
+    <script src="../sidebar.js"></script>
+    <script src="../cli-tabs.js"></script>
+  </body>
+</html>

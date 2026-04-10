@@ -1,0 +1,116 @@
+{
+  "port": 4000,
+  "host": "127.0.0.1",
+  "metrics": true,
+  "strict": true,
+
+  "llm": {
+    "fixtures": "fixtures/example-greeting.json",
+    "chaos": {
+      "dropRate": 0.01,
+      "malformedRate": 0.005,
+      "disconnectRate": 0.002
+    }
+  },
+
+  "mcp": {
+    "serverInfo": { "name": "full-suite-mcp", "version": "1.0.0" },
+    "tools": [
+      {
+        "name": "search",
+        "description": "Search the knowledge base",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string" },
+            "limit": { "type": "number" }
+          },
+          "required": ["query"]
+        },
+        "result": "Found 3 results for your query."
+      }
+    ],
+    "resources": [
+      {
+        "uri": "file:///config",
+        "name": "Configuration",
+        "mimeType": "application/json",
+        "text": "{\"version\": \"1.0\", \"environment\": \"test\"}"
+      }
+    ],
+    "prompts": [
+      {
+        "name": "summarize",
+        "description": "Summarize a document",
+        "arguments": [{ "name": "text", "description": "The text to summarize", "required": true }],
+        "result": {
+          "messages": [
+            {
+              "role": "assistant",
+              "content": { "type": "text", "text": "Here is a summary of the provided text." }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "a2a": {
+    "agents": [
+      {
+        "name": "assistant",
+        "description": "A general-purpose assistant agent",
+        "version": "1.0.0",
+        "skills": [{ "id": "qa", "name": "Q&A", "description": "Answer questions" }],
+        "capabilities": { "streaming": true },
+        "messages": [
+          {
+            "pattern": ".*",
+            "parts": [{ "text": "I can help you with that." }]
+          }
+        ]
+      }
+    ]
+  },
+
+  "agui": {
+    "fixtures": [
+      {
+        "match": { "message": "hello" },
+        "text": "Hello from the full-suite mock!"
+      },
+      {
+        "match": { "toolName": "get_data" },
+        "events": [
+          { "type": "RUN_STARTED", "threadId": "t1", "runId": "r1" },
+          { "type": "TOOL_CALL_START", "toolCallId": "tc1", "toolCallName": "get_data" },
+          { "type": "TOOL_CALL_ARGS", "toolCallId": "tc1", "delta": "{}" },
+          { "type": "TOOL_CALL_END", "toolCallId": "tc1" },
+          { "type": "RUN_FINISHED", "threadId": "t1", "runId": "r1" }
+        ]
+      }
+    ]
+  },
+
+  "vector": {
+    "collections": [
+      {
+        "name": "knowledge-base",
+        "dimension": 384,
+        "queryResults": [
+          {
+            "id": "kb-001",
+            "score": 0.97,
+            "metadata": { "source": "docs", "title": "Quick Start Guide" }
+          }
+        ]
+      }
+    ]
+  },
+
+  "services": {
+    "search": true,
+    "rerank": true,
+    "moderate": true
+  }
+}

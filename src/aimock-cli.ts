@@ -2,15 +2,21 @@
 import { parseArgs } from "node:util";
 import { resolve } from "node:path";
 import { loadConfig, startFromConfig } from "./config-loader.js";
+import { runConvertCli, type ConvertCliDeps } from "./convert.js";
 
 const HELP = `
 Usage: aimock [options]
+       aimock convert <format> <input> [output]
 
 Options:
   -c, --config <path>   Path to aimock config JSON file (required)
   -p, --port <number>   Port override (default: from config or 0)
   -h, --host <string>   Host override (default: from config or 127.0.0.1)
       --help            Show this help message
+
+Subcommands:
+  convert               Convert third-party mock configs to aimock format
+                        Run "aimock convert --help" for details
 `.trim();
 
 export interface AimockCliDeps {
@@ -21,6 +27,7 @@ export interface AimockCliDeps {
   loadConfigFn?: typeof loadConfig;
   startFromConfigFn?: typeof startFromConfig;
   onReady?: (ctx: { shutdown: () => void }) => void;
+  convertDeps?: Partial<ConvertCliDeps>;
 }
 
 export function runAimockCli(deps: AimockCliDeps = {}): void {
@@ -31,6 +38,18 @@ export function runAimockCli(deps: AimockCliDeps = {}): void {
   const exit = deps.exit ?? process.exit.bind(process);
   const loadConfigFn = deps.loadConfigFn ?? loadConfig;
   const startFromConfigFn = deps.startFromConfigFn ?? startFromConfig;
+
+  // Intercept "convert" subcommand before parseArgs (which uses strict mode)
+  if (argv[0] === "convert") {
+    runConvertCli({
+      argv: argv.slice(1),
+      log,
+      logError,
+      exit,
+      ...deps.convertDeps,
+    });
+    return;
+  }
 
   let values;
   try {

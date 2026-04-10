@@ -1,0 +1,91 @@
+name: "aimock"
+description: "Start an aimock server for AI application testing — LLM APIs, MCP, A2A, AG-UI, vector DBs"
+branding:
+  icon: "server"
+  color: "green"
+
+inputs:
+  fixtures:
+    description: "Path to fixture files or directory"
+    required: false
+    default: "./fixtures"
+  config:
+    description: "Path to aimock JSON config file (overrides fixtures)"
+    required: false
+  port:
+    description: "Port to listen on"
+    required: false
+    default: "4010"
+  host:
+    description: "Host to bind to"
+    required: false
+    default: "127.0.0.1"
+  version:
+    description: "aimock version to install (default: latest)"
+    required: false
+    default: "latest"
+  args:
+    description: "Additional CLI arguments (e.g., --strict --record --provider-openai https://api.openai.com)"
+    required: false
+    default: ""
+  wait-timeout:
+    description: "Max seconds to wait for health check (default: 30)"
+    required: false
+    default: "30"
+
+outputs:
+  url:
+    description: "The aimock server URL (e.g., http://127.0.0.1:4010)"
+    value: ${{ steps.start.outputs.url }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install aimock
+      shell: bash
+      run: npm install -g @copilotkit/aimock@${{ inputs.version }}
+
+    - name: Start aimock
+      id: start
+      shell: bash
+      run: |
+        URL="http://${{ inputs.host }}:${{ inputs.port }}"
+        echo "url=${URL}" >> $GITHUB_OUTPUT
+
+        if [ -n "${{ inputs.config }}" ]; then
+          aimock --config "${{ inputs.config }}" \
+            --port ${{ inputs.port }} \
+            --host ${{ inputs.host }} \
+            ${{ inputs.args }} &
+        else
+          llmock --fixtures "${{ inputs.fixtures }}" \
+            --port ${{ inputs.port }} \
+            --host ${{ inputs.host }} \
+            ${{ inputs.args }} &
+        fi
+
+        echo $! > /tmp/aimock.pid
+        echo "Started aimock (PID: $(cat /tmp/aimock.pid))"
+
+    - name: Wait for health check
+      shell: bash
+      run: |
+        URL="http://${{ inputs.host }}:${{ inputs.port }}/health"
+        TIMEOUT=${{ inputs.wait-timeout }}
+        ELAPSED=0
+
+        echo "Waiting for ${URL} ..."
+        while [ $ELAPSED -lt $TIMEOUT ]; do
+          if curl -sf "$URL" > /dev/null 2>&1; then
+            echo "aimock is ready at http://${{ inputs.host }}:${{ inputs.port }}"
+            exit 0
+          fi
+          sleep 1
+          ELAPSED=$((ELAPSED + 1))
+        done
+
+        echo "::error::aimock failed to start within ${TIMEOUT}s"
+        if [ -f /tmp/aimock.pid ]; then
+          kill "$(cat /tmp/aimock.pid)" 2>/dev/null || true
+        fi
+        exit 1

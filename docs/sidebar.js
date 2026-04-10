@@ -9,6 +9,7 @@
         { label: "Record & Replay", href: "/record-replay" },
         { label: "Quick Start: LLM", href: "/chat-completions" },
         { label: "Quick Start: aimock", href: "/aimock-cli" },
+        { label: "Examples", href: "/examples" },
       ],
     },
     {
@@ -65,6 +66,8 @@
       links: [
         { label: "aimock CLI & Config", href: "/aimock-cli" },
         { label: "Docker & Helm", href: "/docker" },
+        { label: "GitHub Action", href: "/github-action" },
+        { label: "Test Plugins", href: "/test-plugins" },
         { label: "Drift Detection", href: "/drift-detection" },
       ],
     },

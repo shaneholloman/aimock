@@ -1,0 +1,20 @@
+{
+  "fixtures": [
+    {
+      "match": { "userMessage": "tell me a joke", "sequenceIndex": 0 },
+      "response": {
+        "content": "Why did the programmer quit his job? Because he didn't get arrays!"
+      }
+    },
+    {
+      "match": { "userMessage": "tell me a joke", "sequenceIndex": 1 },
+      "response": { "content": "Why do Java developers wear glasses? Because they can't C#!" }
+    },
+    {
+      "match": { "userMessage": "tell me a joke", "sequenceIndex": 2 },
+      "response": {
+        "content": "A SQL query walks into a bar, sees two tables, and asks: 'Can I join you?'"
+      }
+    }
+  ]
+}

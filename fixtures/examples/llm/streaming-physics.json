@@ -1,0 +1,15 @@
+{
+  "fixtures": [
+    {
+      "match": { "userMessage": "explain gravity" },
+      "response": {
+        "content": "Gravity is a fundamental force of nature that attracts objects with mass toward one another. It keeps planets in orbit around the sun and holds galaxies together."
+      },
+      "streamingProfile": {
+        "ttft": 200,
+        "tps": 40,
+        "jitter": 0.1
+      }
+    }
+  ]
+}
