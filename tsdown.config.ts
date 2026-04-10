@@ -7,6 +7,8 @@ export default defineConfig({
     "src/mcp-stub.ts",
     "src/a2a-stub.ts",
     "src/vector-stub.ts",
+    "src/vitest.ts",
+    "src/jest.ts",
   ],
   format: ["esm", "cjs"],
   dts: true,
