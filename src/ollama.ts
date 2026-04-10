@@ -388,6 +388,7 @@ export async function handleOllama(
 
   // Convert to ChatCompletionRequest for fixture matching
   const completionReq = ollamaToCompletionRequest(ollamaReq);
+  completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
   const fixture = matchFixture(
@@ -646,6 +647,7 @@ export async function handleOllamaGenerate(
 
   // Convert to ChatCompletionRequest for fixture matching
   const completionReq = ollamaGenerateToCompletionRequest(generateReq);
+  completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
   const fixture = matchFixture(

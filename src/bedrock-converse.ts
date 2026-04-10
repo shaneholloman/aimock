@@ -271,6 +271,7 @@ export async function handleConverse(
   }
 
   const completionReq = converseToCompletionRequest(converseReq, modelId);
+  completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
   const fixture = matchFixture(
@@ -480,6 +481,7 @@ export async function handleConverseStream(
   }
 
   const completionReq = converseToCompletionRequest(converseReq, modelId);
+  completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
   const fixture = matchFixture(

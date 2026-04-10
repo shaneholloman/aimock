@@ -33,6 +33,10 @@ import { handleGemini } from "./gemini.js";
 import { handleBedrock, handleBedrockStream } from "./bedrock.js";
 import { handleConverse, handleConverseStream } from "./bedrock-converse.js";
 import { handleEmbeddings } from "./embeddings.js";
+import { handleImages } from "./images.js";
+import { handleSpeech } from "./speech.js";
+import { handleTranscription } from "./transcription.js";
+import { handleVideoCreate, handleVideoStatus, type VideoStateMap } from "./video.js";
 import { handleOllama, handleOllamaGenerate } from "./ollama.js";
 import { handleCohere } from "./cohere.js";
 import { handleSearch, type SearchFixture } from "./search.js";
@@ -52,6 +56,7 @@ export interface ServerInstance {
   journal: Journal;
   url: string;
   defaults: HandlerDefaults;
+  videoStates: VideoStateMap;
 }
 
 const COMPLETIONS_PATH = "/v1/chat/completions";
@@ -65,6 +70,12 @@ const COHERE_CHAT_PATH = "/v2/chat";
 const SEARCH_PATH = "/search";
 const RERANK_PATH = "/v2/rerank";
 const MODERATIONS_PATH = "/v1/moderations";
+const IMAGES_PATH = "/v1/images/generations";
+const SPEECH_PATH = "/v1/audio/speech";
+const TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions";
+const VIDEOS_PATH = "/v1/videos";
+const VIDEOS_STATUS_RE = /^\/v1\/videos\/([^/]+)$/;
+const GEMINI_PREDICT_RE = /^\/v1beta\/models\/([^:]+):predict$/;
 const DEFAULT_CHUNK_SIZE = 20;
 
 const GEMINI_PATH_RE = /^\/v1beta\/models\/([^:]+):(generateContent|streamGenerateContent)$/;
@@ -140,6 +151,7 @@ async function handleControlAPI(
   pathname: string,
   fixtures: Fixture[],
   journal: Journal,
+  videoStates: VideoStateMap,
 ): Promise<boolean> {
   if (!pathname.startsWith(CONTROL_PREFIX)) return false;
 
@@ -213,6 +225,7 @@ async function handleControlAPI(
   if (subPath === "/reset" && req.method === "POST") {
     fixtures.length = 0;
     journal.clear();
+    videoStates.clear();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ reset: true }));
     return true;
@@ -344,6 +357,7 @@ async function handleCompletions(
   }
 
   // Match fixture
+  body._endpointType = "chat";
   const testId = getTestId(req);
   const fixture = matchFixture(
     fixtures,
@@ -633,6 +647,7 @@ export async function createServer(
   }
 
   const journal = new Journal();
+  const videoStates: VideoStateMap = new Map();
 
   // Share journal and metrics registry with mounted services
   if (mounts) {
@@ -703,7 +718,7 @@ export async function createServer(
 
     // Control API — must be checked before mounts and path rewrites
     if (pathname.startsWith(CONTROL_PREFIX)) {
-      await handleControlAPI(req, res, pathname, fixtures, journal);
+      await handleControlAPI(req, res, pathname, fixtures, journal, videoStates);
       return;
     }
 
@@ -933,6 +948,136 @@ export async function createServer(
           }
           return handleEmbeddings(req, res, raw, fixtures, journal, defaults, setCorsHeaders);
         })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : "Internal error";
+          if (!res.headersSent) {
+            writeErrorResponse(
+              res,
+              500,
+              JSON.stringify({ error: { message: msg, type: "server_error" } }),
+            );
+          } else if (!res.writableEnded) {
+            res.destroy();
+          }
+        });
+      return;
+    }
+
+    // POST /v1/images/generations — OpenAI Image Generation API
+    if (pathname === IMAGES_PATH && req.method === "POST") {
+      readBody(req)
+        .then((raw) => handleImages(req, res, raw, fixtures, journal, defaults, setCorsHeaders))
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : "Internal error";
+          if (!res.headersSent) {
+            writeErrorResponse(
+              res,
+              500,
+              JSON.stringify({ error: { message: msg, type: "server_error" } }),
+            );
+          } else if (!res.writableEnded) {
+            res.destroy();
+          }
+        });
+      return;
+    }
+
+    // POST /v1/audio/speech — OpenAI TTS API
+    if (pathname === SPEECH_PATH && req.method === "POST") {
+      readBody(req)
+        .then((raw) => handleSpeech(req, res, raw, fixtures, journal, defaults, setCorsHeaders))
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : "Internal error";
+          if (!res.headersSent) {
+            writeErrorResponse(
+              res,
+              500,
+              JSON.stringify({ error: { message: msg, type: "server_error" } }),
+            );
+          } else if (!res.writableEnded) {
+            res.destroy();
+          }
+        });
+      return;
+    }
+
+    // POST /v1/audio/transcriptions — OpenAI Transcription API
+    if (pathname === TRANSCRIPTIONS_PATH && req.method === "POST") {
+      readBody(req)
+        .then((raw) =>
+          handleTranscription(req, res, raw, fixtures, journal, defaults, setCorsHeaders),
+        )
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : "Internal error";
+          if (!res.headersSent) {
+            writeErrorResponse(
+              res,
+              500,
+              JSON.stringify({ error: { message: msg, type: "server_error" } }),
+            );
+          } else if (!res.writableEnded) {
+            res.destroy();
+          }
+        });
+      return;
+    }
+
+    // POST /v1/videos — Video Generation API
+    if (pathname === VIDEOS_PATH && req.method === "POST") {
+      readBody(req)
+        .then((raw) =>
+          handleVideoCreate(
+            req,
+            res,
+            raw,
+            fixtures,
+            journal,
+            defaults,
+            setCorsHeaders,
+            videoStates,
+          ),
+        )
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : "Internal error";
+          if (!res.headersSent) {
+            writeErrorResponse(
+              res,
+              500,
+              JSON.stringify({ error: { message: msg, type: "server_error" } }),
+            );
+          } else if (!res.writableEnded) {
+            res.destroy();
+          }
+        });
+      return;
+    }
+
+    // GET /v1/videos/{id} — Video Status Check
+    const videoStatusMatch = pathname.match(VIDEOS_STATUS_RE);
+    if (videoStatusMatch && req.method === "GET") {
+      const videoId = videoStatusMatch[1];
+      handleVideoStatus(req, res, videoId, journal, setCorsHeaders, videoStates);
+      return;
+    }
+
+    // POST /v1beta/models/{model}:predict — Gemini Imagen API
+    const geminiPredictMatch = pathname.match(GEMINI_PREDICT_RE);
+    if (geminiPredictMatch && req.method === "POST") {
+      const predictModel = geminiPredictMatch[1];
+      readBody(req)
+        .then((raw) =>
+          handleImages(
+            req,
+            res,
+            raw,
+            fixtures,
+            journal,
+            defaults,
+            setCorsHeaders,
+            "gemini",
+            predictModel,
+          ),
+        )
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : "Internal error";
           if (!res.headersSent) {
@@ -1466,7 +1611,7 @@ export async function createServer(
         }
       }
 
-      resolve({ server, journal, url, defaults });
+      resolve({ server, journal, url, defaults, videoStates });
     });
   });
 }

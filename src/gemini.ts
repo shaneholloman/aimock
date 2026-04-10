@@ -504,6 +504,7 @@ export async function handleGemini(
 
   // Convert to ChatCompletionRequest for fixture matching
   const completionReq = geminiToCompletionRequest(geminiReq, model, streaming);
+  completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
   const fixture = matchFixture(

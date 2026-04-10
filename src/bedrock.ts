@@ -315,6 +315,7 @@ export async function handleBedrock(
 
   // Convert to ChatCompletionRequest for fixture matching
   const completionReq = bedrockToCompletionRequest(bedrockReq, modelId);
+  completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
   const fixture = matchFixture(
@@ -671,6 +672,7 @@ export async function handleBedrockStream(
   }
 
   const completionReq = bedrockToCompletionRequest(bedrockReq, modelId);
+  completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
   const fixture = matchFixture(

@@ -85,6 +85,7 @@ export async function handleEmbeddings(
     model: embeddingReq.model,
     messages: [],
     embeddingInput: combinedInput,
+    _endpointType: "embedding",
   };
 
   const testId = getTestId(req);

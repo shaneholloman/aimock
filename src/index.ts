@@ -69,6 +69,13 @@ export { handleWebSocketResponses } from "./ws-responses.js";
 export { handleWebSocketRealtime } from "./ws-realtime.js";
 export { handleWebSocketGeminiLive } from "./ws-gemini-live.js";
 
+// Multimedia handlers
+export { handleImages } from "./images.js";
+export { handleSpeech } from "./speech.js";
+export { handleTranscription } from "./transcription.js";
+export { handleVideoCreate, handleVideoStatus } from "./video.js";
+export type { VideoStateMap } from "./video.js";
+
 // Helpers
 export {
   flattenHeaders,
@@ -79,6 +86,10 @@ export {
   buildTextChunks,
   buildToolCallChunks,
   isEmbeddingResponse,
+  isImageResponse,
+  isAudioResponse,
+  isTranscriptionResponse,
+  isVideoResponse,
   generateDeterministicEmbedding,
   buildEmbeddingResponse,
 } from "./helpers.js";
@@ -249,4 +260,9 @@ export type {
   ChatCompletion,
   ChatCompletionChoice,
   ChatCompletionMessage,
+  ImageItem,
+  ImageResponse,
+  AudioResponse,
+  TranscriptionResponse,
+  VideoResponse,
 } from "./types.js";

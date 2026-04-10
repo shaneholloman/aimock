@@ -465,6 +465,7 @@ export async function handleCohere(
 
   // Convert to ChatCompletionRequest for fixture matching
   const completionReq = cohereToCompletionRequest(cohereReq);
+  completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
   const fixture = matchFixture(

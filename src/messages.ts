@@ -678,6 +678,7 @@ export async function handleMessages(
 
   // Convert to ChatCompletionRequest for fixture matching
   const completionReq = claudeToCompletionRequest(claudeReq);
+  completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
   const fixture = matchFixture(

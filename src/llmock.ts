@@ -1,4 +1,5 @@
 import type {
+  AudioResponse,
   ChaosConfig,
   EmbeddingFixtureOpts,
   Fixture,
@@ -6,9 +7,12 @@ import type {
   FixtureMatch,
   FixtureOpts,
   FixtureResponse,
+  ImageResponse,
   MockServerOptions,
   Mountable,
   RecordConfig,
+  TranscriptionResponse,
+  VideoResponse,
 } from "./types.js";
 import { createServer, type ServerInstance } from "./server.js";
 import {
@@ -122,6 +126,34 @@ export class LLMock {
 
   onToolResult(id: string, response: FixtureResponse, opts?: FixtureOpts): this {
     return this.on({ toolCallId: id }, response, opts);
+  }
+
+  onImage(prompt: string | RegExp, response: ImageResponse): this {
+    return this.addFixture({
+      match: { userMessage: prompt, endpoint: "image" },
+      response,
+    });
+  }
+
+  onSpeech(input: string | RegExp, response: AudioResponse): this {
+    return this.addFixture({
+      match: { userMessage: input, endpoint: "speech" },
+      response,
+    });
+  }
+
+  onTranscription(response: TranscriptionResponse): this {
+    return this.addFixture({
+      match: { endpoint: "transcription" },
+      response,
+    });
+  }
+
+  onVideo(prompt: string | RegExp, response: VideoResponse): this {
+    return this.addFixture({
+      match: { userMessage: prompt, endpoint: "video" },
+      response,
+    });
   }
 
   // ---- Service mock convenience methods ----
@@ -252,6 +284,7 @@ export class LLMock {
     this.moderationFixtures.length = 0;
     if (this.serverInstance) {
       this.serverInstance.journal.clear();
+      this.serverInstance.videoStates.clear();
     }
     return this;
   }
