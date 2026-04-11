@@ -1,4 +1,4 @@
-# llmock
+# aimock
 
 ## Before Every Commit
 
@@ -42,6 +42,10 @@ Automated drift remediation lives in `scripts/`:
 - `scripts/fix-drift.ts` — reads drift report, invokes Claude Code to fix builders, creates PR or issue
 
 See `DRIFT.md` for full documentation and `.github/workflows/fix-drift.yml` for the CI workflow.
+
+## Forbidden Paths
+
+- **NEVER commit internal planning documents** (specs, plans, design docs) to this repo. No `docs/superpowers/`, no `docs/plans/`, no `docs/specs/`. These are gitignored. Store them in Notion or `~/.claude/` instead.
 
 ## Commit Messages
 

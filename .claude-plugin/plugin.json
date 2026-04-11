@@ -1,12 +1,12 @@
 {
-  "name": "llmock",
+  "name": "aimock",
   "version": "1.13.0",
-  "description": "Fixture authoring guidance for @copilotkit/aimock",
+  "description": "Fixture authoring guidance for @copilotkit/aimock — LLM, multimedia, MCP, A2A, AG-UI, vector, and service mocking",
   "author": {
     "name": "CopilotKit"
   },
-  "homepage": "https://github.com/CopilotKit/llmock",
-  "repository": "https://github.com/CopilotKit/llmock",
+  "homepage": "https://github.com/CopilotKit/aimock",
+  "repository": "https://github.com/CopilotKit/aimock",
   "license": "MIT",
   "skills": "./skills"
 }

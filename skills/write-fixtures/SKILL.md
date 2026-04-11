@@ -7,7 +7,7 @@ description: Use when writing test fixtures for @copilotkit/aimock — mock LLM 
 
 ## What aimock Is
 
-aimock is a zero-dependency mock LLM server. Fixture-driven. Multi-provider (OpenAI, Anthropic, Gemini, AWS Bedrock, Azure OpenAI, Vertex AI, Ollama, Cohere). Runs a real HTTP server on a real port — works across processes, unlike MSW-style interceptors. WebSocket support for OpenAI Responses/Realtime and Gemini Live APIs. Chaos testing and Prometheus metrics.
+aimock is a zero-dependency mock infrastructure for AI apps. Fixture-driven. Multi-provider (OpenAI, Anthropic, Gemini, AWS Bedrock, Azure OpenAI, Vertex AI, Ollama, Cohere). Multimedia endpoints (image generation, text-to-speech, audio transcription, video generation). MCP, A2A, AG-UI, and vector DB mocking. Runs a real HTTP server on a real port — works across processes, unlike MSW-style interceptors. WebSocket support for OpenAI Responses/Realtime and Gemini Live APIs. Record-and-replay for all endpoints including multimedia. Chaos testing and Prometheus metrics.
 
 ## Core Mental Model
 
@@ -19,19 +19,20 @@ aimock is a zero-dependency mock LLM server. Fixture-driven. Multi-provider (Ope
 
 ## Match Field Reference
 
-| Field            | Type                                      | Matches Against                                                               |
-| ---------------- | ----------------------------------------- | ----------------------------------------------------------------------------- |
-| `userMessage`    | `string`                                  | Substring of last `role: "user"` message text                                 |
-| `userMessage`    | `RegExp`                                  | Pattern test on last `role: "user"` message text                              |
-| `inputText`      | `string`                                  | Substring of embedding input text (concatenated if multiple inputs)           |
-| `inputText`      | `RegExp`                                  | Pattern test on embedding input text                                          |
-| `toolName`       | `string`                                  | Exact match on any tool in request's `tools[]` array (by `function.name`)     |
-| `toolCallId`     | `string`                                  | Exact match on `tool_call_id` of last `role: "tool"` message                  |
-| `model`          | `string`                                  | Exact match on `req.model`                                                    |
-| `model`          | `RegExp`                                  | Pattern test on `req.model`                                                   |
-| `responseFormat` | `string`                                  | Exact match on `req.response_format.type` (`"json_object"`, `"json_schema"`)  |
-| `sequenceIndex`  | `number`                                  | Matches only when this fixture's match count equals the given index (0-based) |
-| `predicate`      | `(req: ChatCompletionRequest) => boolean` | Custom function — full access to request                                      |
+| Field            | Type                                      | Matches Against                                                                                         |
+| ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `userMessage`    | `string`                                  | Substring of last `role: "user"` message text                                                           |
+| `userMessage`    | `RegExp`                                  | Pattern test on last `role: "user"` message text                                                        |
+| `inputText`      | `string`                                  | Substring of embedding input text (concatenated if multiple inputs)                                     |
+| `inputText`      | `RegExp`                                  | Pattern test on embedding input text                                                                    |
+| `toolName`       | `string`                                  | Exact match on any tool in request's `tools[]` array (by `function.name`)                               |
+| `toolCallId`     | `string`                                  | Exact match on `tool_call_id` of last `role: "tool"` message                                            |
+| `model`          | `string`                                  | Exact match on `req.model`                                                                              |
+| `model`          | `RegExp`                                  | Pattern test on `req.model`                                                                             |
+| `responseFormat` | `string`                                  | Exact match on `req.response_format.type` (`"json_object"`, `"json_schema"`)                            |
+| `sequenceIndex`  | `number`                                  | Matches only when this fixture's match count equals the given index (0-based)                           |
+| `endpoint`       | `string`                                  | Restrict to endpoint type: `"chat"`, `"image"`, `"speech"`, `"transcription"`, `"video"`, `"embedding"` |
+| `predicate`      | `(req: ChatCompletionRequest) => boolean` | Custom function — full access to request                                                                |
 
 **AND logic**: all specified fields must match. Empty match `{}` = catch-all.
 
@@ -66,6 +67,48 @@ Multi-part content (e.g., `[{type: "text", text: "hello"}]`) is automatically ex
 ```
 
 The embedding vector is returned for each input in the request. If no embedding fixture matches, deterministic embeddings are auto-generated from the input text hash — you only need fixtures when you want specific vectors.
+
+### Image
+
+```typescript
+// Single image
+{
+  image: {
+    url: "https://example.com/generated.png";
+  }
+}
+// Multiple images
+{
+  images: [{ url: "https://example.com/1.png" }, { b64Json: "iVBOR..." }];
+}
+```
+
+Use `match: { endpoint: "image" }` to prevent cross-matching with chat fixtures.
+
+### Speech (TTS)
+
+```typescript
+{ audio: "base64-encoded-audio-data" }
+// With explicit format (default: mp3)
+{ audio: "base64-data", format: "opus" }
+```
+
+### Transcription
+
+```typescript
+// Simple
+{ transcription: { text: "Hello world" } }
+// Verbose with timestamps
+{ transcription: { text: "Hello world", language: "en", duration: 2.5, words: [...], segments: [...] } }
+```
+
+### Video
+
+```typescript
+{ video: { url: "https://example.com/video.mp4", duration: 10 } }
+```
+
+Video uses async polling — `POST /v1/videos` creates, `GET /v1/videos/{id}` checks status.
 
 ### Error
 
@@ -309,6 +352,12 @@ All providers share the same fixture pool — write fixtures once, they work for
 | `WS /v1/responses`                                                                       | OpenAI        | WebSocket |
 | `WS /v1/realtime`                                                                        | OpenAI        | WebSocket |
 | `WS /ws/google.ai...BidiGenerateContent`                                                 | Gemini Live   | WebSocket |
+| `POST /v1/images/generations`                                                            | OpenAI        | HTTP      |
+| `POST /v1beta/models/{model}:predict`                                                    | Gemini Imagen | HTTP      |
+| `POST /v1/audio/speech`                                                                  | OpenAI        | HTTP      |
+| `POST /v1/audio/transcriptions`                                                          | OpenAI        | HTTP      |
+| `POST /v1/videos`                                                                        | OpenAI        | HTTP      |
+| `GET /v1/videos/{id}`                                                                    | OpenAI        | HTTP      |
 
 ## Critical Gotchas
 
@@ -559,6 +608,10 @@ const mock = await LLMock.create({ port: 0 }); // creates + starts in one call
 | `onSearch(pattern, results)`            | Match search requests by query              |
 | `onRerank(pattern, results)`            | Match rerank requests by query              |
 | `onModerate(pattern, result)`           | Match moderation requests by input          |
+| `onImage(pattern, response)`            | Match image generation by prompt            |
+| `onSpeech(pattern, response)`           | Match TTS by input text                     |
+| `onTranscription(match, response)`      | Match audio transcription                   |
+| `onVideo(pattern, response)`            | Match video generation by prompt            |
 | `mount(path, handler)`                  | Mount a Mountable (VectorMock, etc.)        |
 | `url` / `baseUrl`                       | Server URL (throws if not started)          |
 | `port`                                  | Server port number                          |
@@ -567,19 +620,19 @@ Sequential responses use `on()` with `sequenceIndex` in the match — there is n
 
 ## Record-and-Replay (VCR Mode)
 
-llmock supports a VCR-style record-and-replay workflow: unmatched requests are proxied to real provider APIs, and the responses are saved as standard llmock fixture files for deterministic replay.
+aimock supports a VCR-style record-and-replay workflow for ALL endpoints including multimedia (image, TTS, transcription, video): unmatched requests are proxied to real provider APIs, and the responses are saved as standard aimock fixture files for deterministic replay. Binary TTS responses are base64-encoded with format derived from Content-Type. Multimedia fixtures automatically include `endpoint` in their match criteria for correct routing on replay.
 
 ### CLI usage
 
 ```bash
 # Record mode: proxy unmatched requests to real OpenAI and Anthropic APIs
-llmock --record \
+aimock --record \
   --provider-openai https://api.openai.com \
   --provider-anthropic https://api.anthropic.com \
   -f ./fixtures
 
 # Strict mode: fail on unmatched requests (no proxying, no catch-all 404)
-llmock --strict -f ./fixtures
+aimock --strict -f ./fixtures
 ```
 
 - `--record` enables proxy-on-miss. Requires at least one `--provider-*` flag.
