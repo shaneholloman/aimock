@@ -78,6 +78,46 @@ const VIDEOS_STATUS_RE = /^\/v1\/videos\/([^/]+)$/;
 const GEMINI_PREDICT_RE = /^\/v1beta\/models\/([^:]+):predict$/;
 const DEFAULT_CHUNK_SIZE = 20;
 
+// OpenAI-compatible endpoint suffixes for path prefix normalization.
+// Providers like BigModel (/v4/) use non-standard base URL prefixes.
+// Only includes endpoints that third-party OpenAI-compatible providers are
+// likely to serve — excludes provider-specific paths (/messages, /realtime)
+// and endpoints unlikely to appear behind non-standard prefixes
+// (/moderations, /videos, /models).
+const COMPAT_SUFFIXES = [
+  "/chat/completions",
+  "/embeddings",
+  "/responses",
+  "/audio/speech",
+  "/audio/transcriptions",
+  "/images/generations",
+];
+
+/**
+ * Normalize OpenAI-compatible paths with arbitrary prefixes.
+ * Strips /openai/ prefix and rewrites paths ending in known suffixes to /v1/<suffix>.
+ * Skips /v1/ (already standard) and /v2/ (Cohere convention).
+ */
+function normalizeCompatPath(pathname: string, logger?: Logger): string {
+  // Strip /openai/ prefix (Groq/OpenAI-compat alias)
+  if (pathname.startsWith("/openai/")) {
+    pathname = pathname.slice(7);
+  }
+
+  // Normalize arbitrary prefixes to /v1/
+  if (!pathname.startsWith("/v1/") && !pathname.startsWith("/v2/")) {
+    for (const suffix of COMPAT_SUFFIXES) {
+      if (pathname.endsWith(suffix)) {
+        if (logger) logger.debug(`Path normalized: ${pathname} → /v1${suffix}`);
+        pathname = "/v1" + suffix;
+        break;
+      }
+    }
+  }
+
+  return pathname;
+}
+
 const GEMINI_PATH_RE = /^\/v1beta\/models\/([^:]+):(generateContent|streamGenerateContent)$/;
 const AZURE_DEPLOYMENT_RE = /^\/openai\/deployments\/([^/]+)\/(chat\/completions|embeddings)$/;
 const BEDROCK_INVOKE_RE = /^\/model\/([^/]+)\/invoke$/;
@@ -691,12 +731,13 @@ export async function createServer(
     const parsedUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     let pathname = parsedUrl.pathname;
 
-    // Instrument response completion for metrics
+    // Instrument response completion for metrics. The finish callback reads
+    // pathname via closure after normalizeCompatPath has rewritten it, so
+    // metrics record the canonical /v1/... path.
     if (registry) {
-      const rawPathname = pathname;
       res.on("finish", () => {
         try {
-          const normalizedPath = normalizePathLabel(rawPathname);
+          const normalizedPath = normalizePathLabel(pathname);
           const method = req.method ?? "UNKNOWN";
           const status = String(res.statusCode);
           registry.incrementCounter("aimock_requests_total", {
@@ -743,10 +784,9 @@ export async function createServer(
       pathname = `/v1/${operation}`;
     }
 
-    // Groq/OpenAI-compatible alias: strip /openai prefix so that
-    // /openai/v1/chat/completions → /v1/chat/completions, etc.
-    if (!azureDeploymentId && pathname.startsWith("/openai/")) {
-      pathname = pathname.slice(7); // remove "/openai" prefix, keep the rest
+    // Normalize OpenAI-compatible paths (strip /openai/ prefix + rewrite arbitrary prefixes)
+    if (!azureDeploymentId) {
+      pathname = normalizeCompatPath(pathname, logger);
     }
 
     // Health / readiness probes
@@ -1508,9 +1548,9 @@ export async function createServer(
     head: Buffer,
   ): Promise<void> {
     const parsedUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const pathname = parsedUrl.pathname;
+    let pathname = parsedUrl.pathname;
 
-    // Dispatch to mounted services
+    // Dispatch to mounted services before any path rewrites
     if (mounts) {
       for (const { path: mountPath, handler } of mounts) {
         if (
@@ -1521,6 +1561,12 @@ export async function createServer(
           if (await handler.handleUpgrade(socket, head, subPath)) return;
         }
       }
+    }
+
+    // Normalize OpenAI-compatible paths (strip /openai/ prefix + rewrite arbitrary prefixes)
+    // Skip Azure deployment paths — they have their own rewrite in the HTTP handler
+    if (!pathname.match(AZURE_DEPLOYMENT_RE)) {
+      pathname = normalizeCompatPath(pathname, logger);
     }
 
     if (

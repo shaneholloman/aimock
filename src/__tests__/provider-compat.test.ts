@@ -1,4 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
+import http from "node:http";
+import crypto from "node:crypto";
 import { createServer, type ServerInstance } from "../server.js";
 import type { Fixture } from "../types.js";
 
@@ -206,6 +208,248 @@ describe("Together AI compatibility", () => {
     const parsed = JSON.parse(body);
     expect(parsed.choices).toBeDefined();
     expect(parsed.choices[0].message.content).toBe("Hello from aimock!");
+  });
+});
+
+describe("OpenAI-compatible path prefix normalization", () => {
+  it("normalizes /v4/chat/completions to /v1/chat/completions", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    const { status, body } = await httpPost(`${instance.url}/v4/chat/completions`, {
+      model: "bigmodel-4",
+      stream: false,
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(status).toBe(200);
+    const parsed = JSON.parse(body);
+    expect(parsed.choices).toBeDefined();
+    expect(parsed.choices[0].message.content).toBe("Hello from aimock!");
+    expect(parsed.object).toBe("chat.completion");
+  });
+
+  it("normalizes /api/coding/paas/v4/chat/completions to /v1/chat/completions", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    const { status, body } = await httpPost(`${instance.url}/api/coding/paas/v4/chat/completions`, {
+      model: "bigmodel-4",
+      stream: false,
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(status).toBe(200);
+    const parsed = JSON.parse(body);
+    expect(parsed.choices).toBeDefined();
+    expect(parsed.choices[0].message.content).toBe("Hello from aimock!");
+    expect(parsed.object).toBe("chat.completion");
+  });
+
+  it("still handles standard /v1/chat/completions (regression)", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    const { status, body } = await httpPost(`${instance.url}/v1/chat/completions`, {
+      model: "gpt-4o",
+      stream: false,
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(status).toBe(200);
+    const parsed = JSON.parse(body);
+    expect(parsed.choices).toBeDefined();
+    expect(parsed.choices[0].message.content).toBe("Hello from aimock!");
+    expect(parsed.object).toBe("chat.completion");
+  });
+
+  it("normalizes /custom/embeddings to /v1/embeddings", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    const { status, body } = await httpPost(`${instance.url}/custom/embeddings`, {
+      model: "text-embedding-3-small",
+      input: "test embedding via custom prefix",
+    });
+
+    expect(status).toBe(200);
+    const parsed = JSON.parse(body);
+    expect(parsed.object).toBe("list");
+    expect(parsed.data[0].embedding).toBeInstanceOf(Array);
+  });
+
+  it("combines /openai/ prefix strip with normalization for non-v1 paths", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    // /openai/v4/chat/completions — strip /openai/ then normalize /v4/ to /v1/
+    const { status, body } = await httpPost(
+      `${instance.url}/openai/v4/chat/completions`,
+      {
+        model: "llama-3.3-70b-versatile",
+        stream: false,
+        messages: [{ role: "user", content: "hello" }],
+      },
+      { Authorization: "Bearer mock-groq-key" },
+    );
+
+    expect(status).toBe(200);
+    const parsed = JSON.parse(body);
+    expect(parsed.choices).toBeDefined();
+    expect(parsed.choices[0].message.content).toBe("Hello from aimock!");
+  });
+
+  it("normalizes /custom/responses to /v1/responses", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    const { body } = await httpPost(`${instance.url}/custom/responses`, {
+      model: "gpt-4o",
+      input: "hello",
+      stream: false,
+    });
+
+    // Normalization works: we get "No fixture matched" from the Responses handler
+    // (not "Not found" which would mean the path wasn't routed at all)
+    const parsed = JSON.parse(body);
+    expect(parsed.error.type).toBe("invalid_request_error");
+    expect(parsed.error.code).toBe("no_fixture_match");
+  });
+
+  it("normalizes /custom/audio/speech to /v1/audio/speech", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    const { body } = await httpPost(`${instance.url}/custom/audio/speech`, {
+      model: "tts-1",
+      input: "test speech",
+      voice: "alloy",
+    });
+
+    // Normalization works: handler reached (not "Not found")
+    const parsed = JSON.parse(body);
+    expect(parsed.error.type).toBe("invalid_request_error");
+  });
+
+  it("normalizes /custom/audio/transcriptions to /v1/audio/transcriptions", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    const { body } = await httpPost(`${instance.url}/custom/audio/transcriptions`, {
+      model: "whisper-1",
+      file: "test",
+    });
+
+    // Normalization works: handler reached (not "Not found")
+    const parsed = JSON.parse(body);
+    expect(parsed.error.type).toBe("invalid_request_error");
+  });
+
+  it("normalizes /custom/images/generations to /v1/images/generations", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    const { body } = await httpPost(`${instance.url}/custom/images/generations`, {
+      model: "dall-e-3",
+      prompt: "test",
+    });
+
+    // Normalization works: handler reached (not "Not found")
+    const parsed = JSON.parse(body);
+    expect(parsed.error.type).toBe("invalid_request_error");
+  });
+
+  it("does NOT normalize /v2/chat/completions (/v2/ guard for Cohere convention)", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    const { status } = await httpPost(`${instance.url}/v2/chat/completions`, {
+      model: "command-r-plus",
+      stream: false,
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    // /v2/chat/completions should NOT be rewritten to /v1/chat/completions
+    // — the /v2/ guard prevents normalization, so this falls through to 404
+    expect(status).toBe(404);
+  });
+
+  it("routes /v2/chat to Cohere handler (not normalization concern)", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    // /v2/chat is Cohere's endpoint — reaches the Cohere handler directly
+    const { status } = await httpPost(`${instance.url}/v2/chat`, {
+      model: "command-r-plus",
+      stream: false,
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(status).toBe(200);
+  });
+
+  it("returns 404 for unrecognized paths that don't match any suffix", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    const { status } = await httpPost(`${instance.url}/custom/foo/bar`, {
+      model: "test",
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(status).toBe(404);
+  });
+});
+
+describe("WebSocket path normalization", () => {
+  /**
+   * Send an HTTP upgrade request and return the resulting status code.
+   * 101 = upgrade succeeded (WebSocket), anything else = rejected.
+   */
+  function wsUpgrade(url: string, path: string): Promise<{ statusCode: number }> {
+    return new Promise((resolve, reject) => {
+      const parsed = new URL(url);
+      const req = http.request({
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path,
+        headers: {
+          Connection: "Upgrade",
+          Upgrade: "websocket",
+          "Sec-WebSocket-Key": Buffer.from(crypto.randomBytes(16)).toString("base64"),
+          "Sec-WebSocket-Version": "13",
+        },
+      });
+      req.on("upgrade", (_res, socket) => {
+        socket.destroy();
+        resolve({ statusCode: 101 });
+      });
+      req.on("response", (res) => {
+        resolve({ statusCode: res.statusCode ?? 0 });
+      });
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
+  it("WS upgrade to /custom/responses normalizes to /v1/responses", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+    const { statusCode } = await wsUpgrade(instance.url, "/custom/responses");
+    expect(statusCode).toBe(101);
+  });
+
+  it("WS upgrade to /openai/v1/responses works (/openai/ strip)", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+    const { statusCode } = await wsUpgrade(instance.url, "/openai/v1/responses");
+    expect(statusCode).toBe(101);
+  });
+
+  it("WS upgrade to /v2/responses is NOT normalized (returns 404)", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+    const { statusCode } = await wsUpgrade(instance.url, "/v2/responses");
+    expect(statusCode).toBe(404);
+  });
+
+  it("WS upgrade to Azure deployment path is NOT normalized", async () => {
+    instance = await createServer(CATCH_ALL_FIXTURES);
+
+    // Azure deployment WebSocket path should NOT have /openai/ stripped
+    // or be normalized — it should 404 cleanly (Azure WS not supported)
+    const { statusCode } = await wsUpgrade(
+      instance.url,
+      "/openai/deployments/gpt-4o/chat/completions",
+    );
+
+    // Not upgraded (Azure deployment paths don't support WS)
+    expect(statusCode).toBe(404);
   });
 });
 
