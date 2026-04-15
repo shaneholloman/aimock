@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadFixtureFile, loadFixturesFromDir } from "../fixture-loader.js";
+import { entryToFixture, loadFixtureFile, loadFixturesFromDir } from "../fixture-loader.js";
+import type {
+  FixtureFileEntry,
+  ToolCallResponse,
+  TextResponse,
+  ContentWithToolCallsResponse,
+} from "../types.js";
 
 /* ------------------------------------------------------------------ *
  * vi.mock for node:fs — defaults to the real implementation so that  *
@@ -943,5 +949,508 @@ describe("validateFixtures", () => {
         (r) => r.severity === "warning" && r.message.includes("webSearches[1] is empty string"),
       ),
     ).toBe(true);
+  });
+
+  // --- ResponseOverrides validation ---
+
+  it("error: created as a string", () => {
+    const fixtures = [makeFixture({ response: { content: "hi", created: "2024-01-01" as never } })];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some((r) => r.severity === "error" && r.message.includes('override "created"')),
+    ).toBe(true);
+  });
+
+  it("error: usage as a string", () => {
+    const fixtures = [makeFixture({ response: { content: "hi", usage: "bad" as never } })];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some((r) => r.severity === "error" && r.message.includes('override "usage"')),
+    ).toBe(true);
+  });
+
+  it("error: usage with non-numeric field", () => {
+    const fixtures = [
+      makeFixture({
+        response: { content: "hi", usage: { prompt_tokens: "ten" as never } },
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some(
+        (r) => r.severity === "error" && r.message.includes('override "usage.prompt_tokens"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("error: finishReason as a number", () => {
+    const fixtures = [makeFixture({ response: { content: "hi", finishReason: 42 as never } })];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some((r) => r.severity === "error" && r.message.includes('override "finishReason"')),
+    ).toBe(true);
+  });
+
+  it("rejects non-string id", () => {
+    const fixtures = [makeFixture({ response: { content: "hi", id: 123 as never } })];
+    const results = validateFixtures(fixtures);
+    expect(results.some((r) => r.severity === "error" && r.message.includes('override "id"'))).toBe(
+      true,
+    );
+  });
+
+  it("rejects non-string model", () => {
+    const fixtures = [makeFixture({ response: { content: "hi", model: true as never } })];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some((r) => r.severity === "error" && r.message.includes('override "model"')),
+    ).toBe(true);
+  });
+
+  it("rejects non-string role", () => {
+    const fixtures = [makeFixture({ response: { content: "hi", role: 42 as never } })];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some((r) => r.severity === "error" && r.message.includes('override "role"')),
+    ).toBe(true);
+  });
+
+  it("rejects non-string systemFingerprint", () => {
+    const fixtures = [
+      makeFixture({ response: { content: "hi", systemFingerprint: null as never } }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some(
+        (r) => r.severity === "error" && r.message.includes('override "systemFingerprint"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects negative created", () => {
+    const fixtures = [makeFixture({ response: { content: "hi", created: -1 } })];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some((r) => r.severity === "error" && r.message.includes('override "created"')),
+    ).toBe(true);
+  });
+
+  it("rejects usage as array", () => {
+    const fixtures = [makeFixture({ response: { content: "hi", usage: [1, 2, 3] as never } })];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some((r) => r.severity === "error" && r.message.includes('override "usage"')),
+    ).toBe(true);
+  });
+
+  it("rejects usage as null", () => {
+    const fixtures = [makeFixture({ response: { content: "hi", usage: null as never } })];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some((r) => r.severity === "error" && r.message.includes('override "usage"')),
+    ).toBe(true);
+  });
+
+  it("warns about unknown fields on response", () => {
+    // A response with only a typo field like "finishreason" (no content/toolCalls/error)
+    // is not recognized as any valid type
+    const fixtures = [makeFixture({ response: { finishreason: "stop" } as never })];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some((r) => r.severity === "error" && r.message.includes("not a recognized type")),
+    ).toBe(true);
+  });
+
+  it("warns about unknown fields on ContentWithToolCallsResponse", () => {
+    // A CWTC with an extra typo field still validates the known parts
+    const fixtures = [
+      makeFixture({
+        response: {
+          content: "hi",
+          toolCalls: [{ name: "fn", arguments: "{}" }],
+          finishreason: "stop",
+        } as never,
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    // No error — the CWTC is valid; extra fields are silently ignored
+    const errors = results.filter((r) => r.severity === "error");
+    expect(errors).toHaveLength(0);
+  });
+
+  it("warns on empty content in ContentWithToolCallsResponse", () => {
+    // CWTC with empty content triggers the TextResponse empty-content error
+    // since isTextResponse also matches
+    const fixtures = [
+      makeFixture({
+        response: {
+          content: "",
+          toolCalls: [{ name: "fn", arguments: "{}" }],
+        },
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(results.some((r) => r.severity === "error" && r.message.includes("empty"))).toBe(true);
+  });
+
+  it("rejects empty toolCalls in ContentWithToolCallsResponse", () => {
+    const fixtures = [
+      makeFixture({
+        response: {
+          content: "hi",
+          toolCalls: [],
+        },
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(results.some((r) => r.message.includes("empty"))).toBe(true);
+  });
+
+  it("rejects missing tool name in ContentWithToolCallsResponse", () => {
+    const fixtures = [
+      makeFixture({
+        response: {
+          content: "hi",
+          toolCalls: [{ name: "", arguments: "{}" }],
+        },
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(results.some((r) => r.severity === "error" && r.message.includes("name is empty"))).toBe(
+      true,
+    );
+  });
+
+  it("rejects invalid JSON arguments in ContentWithToolCallsResponse", () => {
+    const fixtures = [
+      makeFixture({
+        response: {
+          content: "hi",
+          toolCalls: [{ name: "fn", arguments: "not json" }],
+        },
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some((r) => r.severity === "error" && r.message.includes("not valid JSON")),
+    ).toBe(true);
+  });
+
+  it("rejects non-string reasoning in ContentWithToolCallsResponse", () => {
+    const fixtures = [
+      makeFixture({
+        response: {
+          content: "hi",
+          toolCalls: [{ name: "fn", arguments: "{}" }],
+          reasoning: 123,
+        } as never,
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some(
+        (r) => r.severity === "error" && r.message.includes("reasoning must be a string"),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects non-array webSearches in ContentWithToolCallsResponse", () => {
+    const fixtures = [
+      makeFixture({
+        response: {
+          content: "hi",
+          toolCalls: [{ name: "fn", arguments: "{}" }],
+          webSearches: "not-array",
+        } as never,
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(
+      results.some(
+        (r) => r.severity === "error" && r.message.includes("webSearches must be an array"),
+      ),
+    ).toBe(true);
+  });
+
+  it("warns about unknown usage fields", () => {
+    // Usage with a typo field — all fields are validated as numbers, and promt_tokens
+    // is treated as a number field (just an unfamiliar name, still accepted if numeric)
+    const fixtures = [
+      makeFixture({
+        response: { content: "hi", usage: { promt_tokens: 10 } as never },
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    // No error — unknown numeric fields in usage are silently accepted
+    const usageErrors = results.filter(
+      (r) => r.severity === "error" && r.message.includes("promt_tokens"),
+    );
+    expect(usageErrors).toHaveLength(0);
+  });
+
+  it("rejects non-string id on ToolCallResponse", () => {
+    const fixtures = [
+      makeFixture({
+        response: {
+          toolCalls: [{ name: "fn", arguments: "{}" }],
+          id: 123,
+        } as never,
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(results.some((r) => r.severity === "error" && r.message.includes('override "id"'))).toBe(
+      true,
+    );
+  });
+
+  it("warns about unknown fields on ToolCallResponse", () => {
+    // ToolCallResponse with extra typo field — silently ignored since toolCalls is valid
+    const fixtures = [
+      makeFixture({
+        response: {
+          toolCalls: [{ name: "fn", arguments: "{}" }],
+          finishreason: "tool_calls",
+        } as never,
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    // No error — the ToolCallResponse is valid; extra fields are silently ignored
+    const errors = results.filter((r) => r.severity === "error");
+    expect(errors).toHaveLength(0);
+  });
+
+  it("accepts valid overrides without errors", () => {
+    const fixtures = [
+      makeFixture({
+        response: {
+          content: "hi",
+          id: "chatcmpl-123",
+          created: 1700000000,
+          model: "gpt-4",
+          finishReason: "stop",
+          role: "assistant",
+          systemFingerprint: "fp_abc",
+          usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+        },
+      }),
+    ];
+    const results = validateFixtures(fixtures);
+    // No override-related errors
+    const overrideErrors = results.filter(
+      (r) => r.severity === "error" && r.message.includes("override"),
+    );
+    expect(overrideErrors).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ *  Auto-stringify: object arguments / content in fixture files        *
+ * ------------------------------------------------------------------ */
+
+describe("auto-stringify JSON objects in fixture entries", () => {
+  it("stringifies object arguments in toolCalls", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: {
+        toolCalls: [{ name: "get_weather", arguments: { city: "SF", temp: 72 } }],
+      },
+    };
+    const fixture = entryToFixture(entry);
+    const tc = (fixture.response as ToolCallResponse).toolCalls[0];
+    expect(tc.arguments).toBe('{"city":"SF","temp":72}');
+  });
+
+  it("leaves string arguments unchanged (backward compat)", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: {
+        toolCalls: [{ name: "get_weather", arguments: '{"city":"SF"}' }],
+      },
+    };
+    const fixture = entryToFixture(entry);
+    const tc = (fixture.response as ToolCallResponse).toolCalls[0];
+    expect(tc.arguments).toBe('{"city":"SF"}');
+  });
+
+  it("stringifies object content (structured output)", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: {
+        content: { result: "success", score: 42 },
+      },
+    };
+    const fixture = entryToFixture(entry);
+    expect((fixture.response as TextResponse).content).toBe('{"result":"success","score":42}');
+  });
+
+  it("leaves string content unchanged", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: { content: "Hello, world!" },
+    };
+    const fixture = entryToFixture(entry);
+    expect((fixture.response as TextResponse).content).toBe("Hello, world!");
+  });
+
+  it("stringifies nested objects in arguments", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: {
+        toolCalls: [
+          {
+            name: "complex_call",
+            arguments: { outer: { inner: [1, 2, 3] }, flag: true },
+          },
+        ],
+      },
+    };
+    const fixture = entryToFixture(entry);
+    const tc = (fixture.response as ToolCallResponse).toolCalls[0];
+    expect(tc.arguments).toBe('{"outer":{"inner":[1,2,3]},"flag":true}');
+  });
+
+  it("handles content + toolCalls response with both object fields", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: {
+        content: { summary: "done" },
+        toolCalls: [{ name: "save", arguments: { id: 1 } }],
+      },
+    };
+    const fixture = entryToFixture(entry);
+    const resp = fixture.response as ContentWithToolCallsResponse;
+    expect(resp.content).toBe('{"summary":"done"}');
+    expect(resp.toolCalls[0].arguments).toBe('{"id":1}');
+  });
+
+  it("preserves ResponseOverrides fields through normalization", () => {
+    const entry = {
+      match: { userMessage: "test" },
+      response: {
+        content: { key: "value" },
+        id: "custom-id",
+        model: "custom-model",
+        created: 1234567890,
+        finishReason: "stop",
+        role: "assistant",
+        systemFingerprint: "fp-123",
+        usage: { prompt_tokens: 10 },
+      },
+    };
+    const fixture = entryToFixture(entry as unknown as FixtureFileEntry);
+    const r = fixture.response as Record<string, unknown>;
+    expect(r.content).toBe('{"key":"value"}'); // stringified
+    expect(r.id).toBe("custom-id");
+    expect(r.model).toBe("custom-model");
+    expect(r.created).toBe(1234567890);
+    expect(r.finishReason).toBe("stop");
+    expect(r.role).toBe("assistant");
+    expect(r.systemFingerprint).toBe("fp-123");
+    expect(r.usage).toEqual({ prompt_tokens: 10 });
+  });
+
+  it("stringifies array content", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: { content: [1, 2, 3] as never },
+    };
+    const fixture = entryToFixture(entry);
+    expect((fixture.response as TextResponse).content).toBe("[1,2,3]");
+  });
+
+  it("passes null content through unchanged", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: { content: null as never },
+    };
+    const fixture = entryToFixture(entry);
+    expect((fixture.response as TextResponse).content).toBeNull();
+  });
+
+  it("stringifies array arguments in toolCalls", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: {
+        toolCalls: [{ name: "fn", arguments: [1, 2] as never }],
+      },
+    };
+    const fixture = entryToFixture(entry);
+    const tc = (fixture.response as ToolCallResponse).toolCalls[0];
+    expect(tc.arguments).toBe("[1,2]");
+  });
+
+  it("null arguments pass through unchanged", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: {
+        toolCalls: [{ name: "fn", arguments: null as never }],
+      },
+    };
+    const fixture = entryToFixture(entry);
+    const tc = (fixture.response as ToolCallResponse).toolCalls[0];
+    expect(tc.arguments).toBeNull();
+  });
+
+  it("mixed string/object arguments", () => {
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: {
+        toolCalls: [
+          { name: "fn1", arguments: '{"a":1}' },
+          { name: "fn2", arguments: { b: 2 } },
+        ],
+      },
+    };
+    const fixture = entryToFixture(entry);
+    const tcs = (fixture.response as ToolCallResponse).toolCalls;
+    expect(tcs[0].arguments).toBe('{"a":1}');
+    expect(tcs[1].arguments).toBe('{"b":2}');
+  });
+
+  it("does not mutate the original entry object", () => {
+    const args = { city: "SF" };
+    const entry: FixtureFileEntry = {
+      match: { userMessage: "test" },
+      response: {
+        toolCalls: [{ name: "get_weather", arguments: args }],
+      },
+    };
+    entryToFixture(entry);
+    // Original object should be untouched
+    expect(typeof args).toBe("object");
+    expect(args.city).toBe("SF");
+  });
+
+  it("end-to-end: JSON round-trip through serialize + parse + entryToFixture", () => {
+    // Simulate the full JSON file round-trip: author writes JSON with object
+    // arguments, it gets serialized to disk, parsed back, and loaded.
+    const fixtureData = {
+      fixtures: [
+        {
+          match: { userMessage: "weather" },
+          response: {
+            toolCalls: [{ name: "get_weather", arguments: { city: "SF", temp: 72 } }],
+          },
+        },
+        {
+          match: { userMessage: "structured" },
+          response: {
+            content: { answer: 42, nested: { key: "val" } },
+          },
+        },
+      ],
+    };
+    // Serialize -> parse (same as writing JSON to disk and reading it back)
+    const parsed = JSON.parse(JSON.stringify(fixtureData)) as { fixtures: FixtureFileEntry[] };
+    const fixtures = parsed.fixtures.map(entryToFixture);
+
+    expect(fixtures).toHaveLength(2);
+
+    const tc = (fixtures[0].response as ToolCallResponse).toolCalls[0];
+    expect(tc.arguments).toBe('{"city":"SF","temp":72}');
+
+    expect((fixtures[1].response as TextResponse).content).toBe(
+      '{"answer":42,"nested":{"key":"val"}}',
+    );
   });
 });

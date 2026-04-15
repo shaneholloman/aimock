@@ -27,14 +27,15 @@ describe("isContentWithToolCallsResponse", () => {
     expect(isContentWithToolCallsResponse(r)).toBe(false);
   });
 
-  it("existing guards still work for combined response", () => {
+  it("existing guards are mutually exclusive with combined response", () => {
     const r = {
       content: "Hello",
       toolCalls: [{ name: "get_weather", arguments: "{}" }],
     };
-    // Both existing guards would match — that's why we check combined first
-    expect(isTextResponse(r)).toBe(true);
-    expect(isToolCallResponse(r)).toBe(true);
+    // Guards are mutually exclusive — combined response only matches isContentWithToolCallsResponse
+    expect(isTextResponse(r)).toBe(false);
+    expect(isToolCallResponse(r)).toBe(false);
+    expect(isContentWithToolCallsResponse(r)).toBe(true);
   });
 });
 
@@ -423,6 +424,139 @@ describe("Gemini — content + toolCalls", () => {
     expect(fcParts.length).toBeGreaterThan(0);
     expect(fcParts[0].functionCall.name).toBe("get_weather");
     expect(body.candidates[0].finishReason).toBe("FUNCTION_CALL");
+  });
+});
+
+describe("Gemini — multi-tool-call CWTC", () => {
+  let mock: LLMock | null = null;
+
+  afterEach(async () => {
+    if (mock) {
+      await mock.stop();
+      mock = null;
+    }
+  });
+
+  it("Gemini non-streaming multi-tool-call CWTC", async () => {
+    mock = new LLMock({ port: 0 });
+    mock.addFixture({
+      match: { userMessage: "test gemini multi-tc" },
+      response: {
+        content: "Sure, let me check.",
+        toolCalls: [
+          { name: "get_weather", arguments: '{"city":"NYC"}' },
+          { name: "get_time", arguments: '{"tz":"EST"}' },
+        ],
+      },
+    });
+    await mock.start();
+
+    const res = await fetch(`${mock.url}/v1beta/models/gemini-2.0-flash:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: "test gemini multi-tc" }] }],
+      }),
+    });
+
+    const body = await res.json();
+    const parts = body.candidates[0].content.parts;
+    const fcParts = parts.filter((p: { functionCall?: unknown }) => p.functionCall !== undefined);
+    expect(fcParts).toHaveLength(2);
+    expect(fcParts[0].functionCall.name).toBe("get_weather");
+    expect(fcParts[1].functionCall.name).toBe("get_time");
+  });
+});
+
+describe("Anthropic — multi-tool-call CWTC streaming", () => {
+  let mock: LLMock | null = null;
+
+  afterEach(async () => {
+    if (mock) {
+      await mock.stop();
+      mock = null;
+    }
+  });
+
+  it("Claude streaming multi-tool-call CWTC", async () => {
+    mock = new LLMock({ port: 0 });
+    mock.addFixture({
+      match: { userMessage: "test claude multi-tc" },
+      response: {
+        content: "Checking.",
+        toolCalls: [
+          { name: "get_weather", arguments: '{"city":"NYC"}' },
+          { name: "get_time", arguments: '{"tz":"EST"}' },
+        ],
+      },
+    });
+    await mock.start();
+
+    const res = await fetch(`${mock.url}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": "test-key",
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        messages: [{ role: "user", content: "test claude multi-tc" }],
+        stream: true,
+      }),
+    });
+
+    const events = parseAnthropicSSEEvents(await res.text());
+    const toolBlockStarts = events.filter(
+      (e) =>
+        e.type === "content_block_start" &&
+        (e.content_block as { type: string })?.type === "tool_use",
+    );
+    expect(toolBlockStarts).toHaveLength(2);
+  });
+});
+
+describe("OpenAI — multi-tool-call CWTC streaming indices", () => {
+  let mock: LLMock | null = null;
+
+  afterEach(async () => {
+    if (mock) {
+      await mock.stop();
+      mock = null;
+    }
+  });
+
+  it("streams content then multiple tool calls with correct indices", async () => {
+    mock = new LLMock({ port: 0 });
+    mock.addFixture({
+      match: { userMessage: "test multi-tc indices" },
+      response: {
+        content: "Here.",
+        toolCalls: [
+          { name: "fn_a", arguments: '{"a":1}' },
+          { name: "fn_b", arguments: '{"b":2}' },
+        ],
+      },
+    });
+    await mock.start();
+
+    const res = await fetch(`${mock.url}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer test" },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: "test multi-tc indices" }],
+        stream: true,
+      }),
+    });
+
+    const chunks = parseSSEChunks(await res.text());
+    const toolChunks = chunks.filter((c) => c.choices?.[0]?.delta?.tool_calls);
+    const indices = toolChunks.map((c) => c.choices[0].delta.tool_calls![0].index);
+    // Should have both index 0 and index 1
+    expect(indices).toContain(0);
+    expect(indices).toContain(1);
   });
 });
 

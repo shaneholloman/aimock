@@ -223,6 +223,21 @@ describe("LLMock", () => {
       expect(res.data).toContain("on response");
     });
 
+    it("on() shorthand passes id and model overrides", async () => {
+      mock = new LLMock();
+      mock.on(
+        { userMessage: "override-test" },
+        { content: "overridden", id: "custom-id-123", model: "custom-model-456" },
+      );
+
+      await mock.start();
+      const res = await post(mock.url, chatBody("override-test", false));
+      expect(res.status).toBe(200);
+      const json = JSON.parse(res.data);
+      expect(json.id).toBe("custom-id-123");
+      expect(json.model).toBe("custom-model-456");
+    });
+
     it("on() shorthand passes latency and chunkSize opts", async () => {
       mock = new LLMock();
       mock.on({ userMessage: "opts-test" }, { content: "response" }, { latency: 0, chunkSize: 5 });
@@ -583,6 +598,67 @@ describe("LLMock", () => {
     it("returns this for chaining", () => {
       mock = new LLMock();
       expect(mock.onToolCall("fn", { content: "r" })).toBe(mock);
+    });
+  });
+
+  describe("programmatic API auto-stringification", () => {
+    it("on() auto-stringifies object arguments in toolCalls", async () => {
+      mock = new LLMock();
+      mock.on(
+        { userMessage: "weather" },
+        {
+          toolCalls: [{ name: "get_weather", arguments: { city: "SF" } }],
+        },
+      );
+      await mock.start();
+
+      const res = await post(mock.url, {
+        model: "gpt-4",
+        messages: [{ role: "user", content: "weather" }],
+        stream: false,
+      });
+
+      expect(res.status).toBe(200);
+      const json = JSON.parse(res.data);
+      const args = json.choices[0].message.tool_calls[0].function.arguments;
+      expect(typeof args).toBe("string");
+      expect(JSON.parse(args)).toEqual({ city: "SF" });
+    });
+
+    it("onMessage() auto-stringifies object content", async () => {
+      mock = new LLMock();
+      mock.onMessage("structured", { content: { answer: 42, nested: { key: "val" } } });
+      await mock.start();
+
+      const res = await post(mock.url, chatBody("structured", false));
+
+      expect(res.status).toBe(200);
+      const json = JSON.parse(res.data);
+      const content = json.choices[0].message.content;
+      expect(typeof content).toBe("string");
+      expect(JSON.parse(content)).toEqual({ answer: 42, nested: { key: "val" } });
+    });
+
+    it("on() preserves string arguments without double-stringifying", async () => {
+      mock = new LLMock();
+      mock.on(
+        { userMessage: "already-string" },
+        {
+          toolCalls: [{ name: "fn", arguments: JSON.stringify({ key: "val" }) }],
+        },
+      );
+      await mock.start();
+
+      const res = await post(mock.url, {
+        model: "gpt-4",
+        messages: [{ role: "user", content: "already-string" }],
+        stream: false,
+      });
+
+      expect(res.status).toBe(200);
+      const json = JSON.parse(res.data);
+      const args = json.choices[0].message.tool_calls[0].function.arguments;
+      expect(JSON.parse(args)).toEqual({ key: "val" });
     });
   });
 
