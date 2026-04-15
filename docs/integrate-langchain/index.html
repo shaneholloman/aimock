@@ -121,7 +121,7 @@ result = llm.<span class="fn">invoke</span>(<span class="str">"hello"</span>)
       <span class="prop">"match"</span>: { <span class="prop">"userMessage"</span>: <span class="str">"plan a trip"</span>, <span class="prop">"sequenceIndex"</span>: <span class="num">1</span> },
       <span class="prop">"response"</span>: {
         <span class="prop">"toolCalls"</span>: [
-          { <span class="prop">"name"</span>: <span class="str">"search_flights"</span>, <span class="prop">"arguments"</span>: <span class="str">"{\"origin\":\"SFO\",\"dest\":\"NRT\"}"</span> }
+          { <span class="prop">"name"</span>: <span class="str">"search_flights"</span>, <span class="prop">"arguments"</span>: { <span class="prop">"origin"</span>: <span class="str">"SFO"</span>, <span class="prop">"dest"</span>: <span class="str">"NRT"</span> } }
         ]
       }
     },
@@ -159,7 +159,7 @@ result = llm.<span class="fn">invoke</span>(<span class="str">"hello"</span>)
         <span class="prop">"toolCalls"</span>: [
           {
             <span class="prop">"name"</span>: <span class="str">"get_weather"</span>,
-            <span class="prop">"arguments"</span>: <span class="str">"{\"location\":\"San Francisco\",\"unit\":\"fahrenheit\"}"</span>
+            <span class="prop">"arguments"</span>: { <span class="prop">"location"</span>: <span class="str">"San Francisco"</span>, <span class="prop">"unit"</span>: <span class="str">"fahrenheit"</span> }
           }
         ]
       }

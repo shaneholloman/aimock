@@ -90,6 +90,7 @@
         { label: "From mock-llm", href: "/migrate-from-mock-llm" },
         { label: "From piyook/llm-mock", href: "/migrate-from-piyook" },
         { label: "From Python Mocks", href: "/migrate-from-python-mocks" },
+        { label: "From openai-responses", href: "/migrate-from-openai-responses" },
         { label: "From Mokksy", href: "/migrate-from-mokksy" },
       ],
     },

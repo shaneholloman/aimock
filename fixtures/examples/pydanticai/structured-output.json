@@ -6,7 +6,7 @@
         "toolCalls": [
           {
             "name": "final_result",
-            "arguments": "{\"city\": \"SF\", \"temp\": 72, \"unit\": \"fahrenheit\"}"
+            "arguments": { "city": "SF", "temp": 72, "unit": "fahrenheit" }
           }
         ]
       }

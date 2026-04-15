@@ -6,7 +6,7 @@
         "toolCalls": [
           {
             "name": "get_weather",
-            "arguments": "{\"location\":\"San Francisco\",\"unit\":\"fahrenheit\"}"
+            "arguments": { "location": "San Francisco", "unit": "fahrenheit" }
           }
         ]
       }

@@ -15,9 +15,6 @@ import type { Logger } from "./logger.js";
 // Result type shared by all collapse functions
 // ---------------------------------------------------------------------------
 
-// TODO: Consider making this a discriminated union ({ type: "text"; content: string }
-// | { type: "toolCalls"; toolCalls: ToolCall[] } | { type: "empty" }) to prevent
-// ambiguous results and simplify downstream consumers.
 export interface CollapseResult {
   content?: string;
   reasoning?: string;

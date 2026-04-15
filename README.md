@@ -52,6 +52,7 @@ Run them all on one port with `npx aimock --config aimock.json`, or use the prog
 - **[Prometheus Metrics](https://aimock.copilotkit.dev/metrics)** — Request counts, latencies, fixture match rates
 - **[Docker + Helm](https://aimock.copilotkit.dev/docker)** — Container image and Helm chart for CI/CD
 - **[Vitest & Jest Plugins](https://aimock.copilotkit.dev/test-plugins)** — Zero-config `useAimock()` with auto lifecycle and env patching
+- **[Response Overrides](https://aimock.copilotkit.dev/fixtures)** — Control `id`, `model`, `usage`, `finishReason` in fixture responses
 - **Zero dependencies** — Everything from Node.js builtins
 
 ## GitHub Action
@@ -94,7 +95,7 @@ Test your AI agents with aimock — no API keys, no network calls: [LangChain](h
 
 ## Switching from other tools?
 
-Step-by-step migration guides: [MSW](https://aimock.copilotkit.dev/migrate-from-msw) · [VidaiMock](https://aimock.copilotkit.dev/migrate-from-vidaimock) · [mock-llm](https://aimock.copilotkit.dev/migrate-from-mock-llm) · [piyook/llm-mock](https://aimock.copilotkit.dev/migrate-from-piyook) · [Python mocks](https://aimock.copilotkit.dev/migrate-from-python-mocks) · [Mokksy](https://aimock.copilotkit.dev/migrate-from-mokksy)
+Step-by-step migration guides: [MSW](https://aimock.copilotkit.dev/migrate-from-msw) · [VidaiMock](https://aimock.copilotkit.dev/migrate-from-vidaimock) · [mock-llm](https://aimock.copilotkit.dev/migrate-from-mock-llm) · [piyook/llm-mock](https://aimock.copilotkit.dev/migrate-from-piyook) · [Python mocks](https://aimock.copilotkit.dev/migrate-from-python-mocks) · [openai-responses](https://aimock.copilotkit.dev/migrate-from-openai-responses) · [Mokksy](https://aimock.copilotkit.dev/migrate-from-mokksy)
 
 ## Documentation
 

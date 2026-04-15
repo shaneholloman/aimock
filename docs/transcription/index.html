@@ -96,7 +96,7 @@
 });
 
 <span class="fn">it</span>(<span class="str">"returns simple transcription text"</span>, <span class="kw">async</span> () <span class="kw">=&gt;</span> {
-  <span class="op">mock</span>.<span class="fn">onTranscription</span>(<span class="str">"audio.mp3"</span>, {
+  <span class="op">mock</span>.<span class="fn">onTranscription</span>({
     <span class="prop">transcription</span>: { <span class="prop">text</span>: <span class="str">"Hello, how are you today?"</span> },
   });
 
@@ -121,7 +121,7 @@
             transcription-verbose.test.ts <span class="lang-tag">ts</span>
           </div>
           <pre><code><span class="fn">it</span>(<span class="str">"returns verbose transcription with words and segments"</span>, <span class="kw">async</span> () <span class="kw">=&gt;</span> {
-  <span class="op">mock</span>.<span class="fn">onTranscription</span>(<span class="str">"meeting.wav"</span>, {
+  <span class="op">mock</span>.<span class="fn">onTranscription</span>({
     <span class="prop">transcription</span>: {
       <span class="prop">text</span>: <span class="str">"Welcome to the meeting."</span>,
       <span class="prop">words</span>: [

@@ -1,5 +1,20 @@
 # @copilotkit/aimock
 
+## 1.14.0
+
+### Minor Changes
+
+- Response template merging — override `id`, `created`, `model`, `usage`, `finishReason`, `role`, `systemFingerprint` on fixture responses across all 4 provider formats (OpenAI, Claude, Gemini, Responses API) (#111)
+- JSON auto-stringify — fixture `arguments` and `content` fields accept objects that are auto-stringified by the loader, eliminating escaped JSON pain (#111)
+- Migration guide from openai-responses-python (#111)
+- All fixture examples and docs converted to object syntax (#111)
+
+### Patch Changes
+
+- Fix `onTranscription` docs to show correct 1-argument signature
+- Fix `validateFixtures` to recognize ContentWithToolCalls and multimedia response types
+- Add `ResponseOverrides` field validation in `validateFixtures` — catches invalid types for `id`, `created`, `model`, `usage`, `finishReason`, `role`, `systemFingerprint`
+
 ## 1.13.0
 
 ### Minor Changes

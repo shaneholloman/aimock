@@ -111,11 +111,20 @@
         <span class="key">"responseFormat"</span>: <span class="str">"json_object"</span>
       },
       <span class="key">"response"</span>: {
-        <span class="key">"content"</span>: <span class="str">"{\"answer\":42,\"items\":[\"a\",\"b\"]}"</span>
+        <span class="key">"content"</span>: { <span class="key">"answer"</span>: <span class="num">42</span>, <span class="key">"items"</span>: [<span class="str">"a"</span>, <span class="str">"b"</span>] }
       }
     }
   ]
 }</code></pre>
+        </div>
+
+        <div class="info-box">
+          <p>
+            <strong>Auto-stringify:</strong> The <code>content</code> field accepts objects in
+            fixture files. The loader detects <code>typeof === "object"</code> and calls
+            <code>JSON.stringify()</code> automatically. The escaped-string form
+            (<code>"{\"answer\":42}"</code>) still works for backward compatibility.
+          </p>
         </div>
 
         <h2>Match Behavior</h2>

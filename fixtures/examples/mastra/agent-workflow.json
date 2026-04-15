@@ -6,7 +6,7 @@
         "toolCalls": [
           {
             "name": "search_flights",
-            "arguments": "{\"origin\":\"SFO\",\"destination\":\"NRT\",\"date\":\"2025-03-15\"}"
+            "arguments": { "origin": "SFO", "destination": "NRT", "date": "2025-03-15" }
           }
         ]
       }
@@ -17,7 +17,7 @@
         "toolCalls": [
           {
             "name": "search_hotels",
-            "arguments": "{\"city\":\"Tokyo\",\"checkIn\":\"2025-03-15\",\"checkOut\":\"2025-03-22\"}"
+            "arguments": { "city": "Tokyo", "checkIn": "2025-03-15", "checkOut": "2025-03-22" }
           }
         ]
       }

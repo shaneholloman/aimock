@@ -51,12 +51,18 @@ Multi-part content (e.g., `[{type: "text", text: "hello"}]`) is automatically ex
 ### Tool Calls
 
 ```typescript
+// Preferred: object form (auto-stringified by the fixture loader)
+{
+  toolCalls: [{ name: "get_weather", arguments: { city: "SF" } }];
+}
+
+// Also accepted: JSON string form (backward compatible)
 {
   toolCalls: [{ name: "get_weather", arguments: '{"city":"SF"}' }];
 }
 ```
 
-**`arguments` MUST be a JSON string**, not an object. This is the #1 mistake.
+**Both object and string forms are accepted** for `arguments`. The fixture loader auto-stringifies objects via `JSON.stringify()`. Object form is preferred for readability.
 
 ### Embedding
 
@@ -106,7 +112,7 @@ Use `match: { endpoint: "image" }` to prevent cross-matching with chat fixtures.
 ### Video
 
 ```typescript
-{ video: { url: "https://example.com/video.mp4", duration: 10 } }
+{ video: { id: "vid-1", status: "completed", url: "https://example.com/video.mp4" } }
 ```
 
 Video uses async polling — `POST /v1/videos` creates, `GET /v1/videos/{id}` checks status.
@@ -148,7 +154,7 @@ The most common pattern. Fixture 1 triggers the tool call, fixture 2 handles the
 ```typescript
 // Step 1: User asks about weather → LLM calls tool
 mock.onMessage("weather", {
-  toolCalls: [{ name: "get_weather", arguments: '{"city":"SF"}' }],
+  toolCalls: [{ name: "get_weather", arguments: { city: "SF" } }],
 });
 
 // Step 2: Tool result comes back → LLM responds with text
@@ -198,7 +204,7 @@ mock.addFixture({
 // First call returns tool call, second returns text
 mock.on(
   { userMessage: "status", sequenceIndex: 0 },
-  { toolCalls: [{ name: "check_status", arguments: "{}" }] },
+  { toolCalls: [{ name: "check_status", arguments: {} }] },
 );
 mock.on({ userMessage: "status", sequenceIndex: 1 }, { content: "All systems operational." });
 ```
@@ -233,7 +239,7 @@ mock.addFixture({
       return typeof sys === "string" && sys.includes("Flights found: false");
     },
   },
-  response: { toolCalls: [{ name: "search_flights", arguments: "{}" }] },
+  response: { toolCalls: [{ name: "search_flights", arguments: {} }] },
 });
 ```
 
@@ -308,6 +314,17 @@ mock.nextRequestError(429, { message: "Rate limited", type: "rate_limit_error" }
       "response": { "content": "Hi!" }
     },
     {
+      "match": { "userMessage": "weather" },
+      "response": {
+        "toolCalls": [
+          {
+            "name": "get_weather",
+            "arguments": { "city": "SF", "units": "fahrenheit" }
+          }
+        ]
+      }
+    },
+    {
       "match": { "inputText": "search query" },
       "response": { "embedding": [0.1, 0.2, 0.3] }
     },
@@ -318,6 +335,8 @@ mock.nextRequestError(429, { message: "Rate limited", type: "rate_limit_error" }
   ]
 }
 ```
+
+**JSON auto-stringify**: In JSON fixture files, `arguments` and `content` can be objects — the loader auto-stringifies them with `JSON.stringify()`. The escaped-string form (`"{\"city\":\"SF\"}"`) still works but objects are preferred for readability.
 
 JSON files cannot use `RegExp` or `predicate` — those are code-only features. `streamingProfile` is supported in JSON fixture files.
 
@@ -360,11 +379,64 @@ All providers share the same fixture pool — write fixtures once, they work for
 | `POST /v1/videos`                                                                        | OpenAI        | HTTP      |
 | `GET /v1/videos/{id}`                                                                    | OpenAI        | HTTP      |
 
+## Response Template Overrides
+
+Fixture responses can include optional override fields to control auto-generated envelope values. These are merged into the provider-specific response format (OpenAI, Claude, Gemini, Responses API).
+
+| Field               | Type   | Default                   | Description                                                                                                                                                                                                                                                                |
+| ------------------- | ------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | string | auto-generated            | Override response ID (e.g., `chatcmpl-custom`)                                                                                                                                                                                                                             |
+| `created`           | number | `Date.now()/1000`         | Override Unix timestamp                                                                                                                                                                                                                                                    |
+| `model`             | string | echoes request            | Override model name in response                                                                                                                                                                                                                                            |
+| `usage`             | object | zeroed                    | Override token counts: `{ prompt_tokens, completion_tokens, total_tokens }`. OpenAI Chat includes usage in response body; Responses API uses `response.usage`. When omitted, auto-computed from content length                                                             |
+| `finishReason`      | string | `"stop"` / `"tool_calls"` | Override finish reason. Mappings: `stop` -> `end_turn` (Claude), `STOP` (Gemini); `tool_calls` -> `tool_use` (Claude), `FUNCTION_CALL` (Gemini); `length` -> `max_tokens` (Claude), `MAX_TOKENS` (Gemini); `content_filter` -> `SAFETY` (Gemini), `failed` (Responses API) |
+| `role`              | string | `"assistant"`             | Override message role                                                                                                                                                                                                                                                      |
+| `systemFingerprint` | string | (omitted)                 | Add `system_fingerprint` to response                                                                                                                                                                                                                                       |
+
+### Example
+
+```typescript
+mock.onMessage("hello", {
+  content: "Hi!",
+  model: "gpt-4-turbo-2024-04-09",
+  usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  systemFingerprint: "fp_abc123",
+});
+```
+
+### In JSON fixtures
+
+```json
+{
+  "match": { "userMessage": "hello" },
+  "response": {
+    "content": "Hi!",
+    "model": "gpt-4-turbo-2024-04-09",
+    "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 },
+    "systemFingerprint": "fp_abc123"
+  }
+}
+```
+
+These fields map correctly across all provider formats — for example, `finishReason: "stop"` becomes `finish_reason: "stop"` in OpenAI, `stop_reason: "end_turn"` in Claude, and `finishReason: "STOP"` in Gemini.
+
+## Provider Support Matrix
+
+| Feature              | OpenAI Chat | OpenAI Responses | Claude | Gemini | Bedrock | Azure | Ollama | Cohere |
+| -------------------- | ----------- | ---------------- | ------ | ------ | ------- | ----- | ------ | ------ |
+| Text                 | Yes         | Yes              | Yes    | Yes    | Yes     | Yes   | Yes    | Yes    |
+| Tool Calls           | Yes         | Yes              | Yes    | Yes    | Yes     | Yes   | Yes    | Yes    |
+| Content + Tool Calls | Yes         | Yes              | Yes    | Yes    | Yes     | Yes   | Yes    | Yes    |
+| Streaming            | SSE         | SSE              | SSE    | SSE    | Binary  | SSE   | NDJSON | SSE    |
+| Reasoning            | Yes         | Yes              | Yes    | Yes    | Yes     | Yes   | --     | --     |
+| Web Searches         | --          | Yes              | --     | --     | --      | --    | --     | --     |
+| Response Overrides   | Yes         | Yes              | Yes    | Yes    | --      | Yes   | --     | --     |
+
 ## Critical Gotchas
 
 1. **Order matters** — first match wins. Specific fixtures before general ones. Use `prependFixture()` to force priority.
 
-2. **`arguments` must be a JSON string** — `"arguments": "{\"key\":\"value\"}"` not `"arguments": {"key":"value"}`. The type system enforces this but JSON fixtures can get it wrong silently.
+2. **`arguments` accepts both objects and strings** — `"arguments": {"key":"value"}` (preferred, auto-stringified) or `"arguments": "{\"key\":\"value\"}"` (legacy). The same applies to `content` fields that contain JSON. The fixture loader detects `typeof === "object"` and calls `JSON.stringify()` automatically.
 
 3. **Latency is per-chunk, not total** — `latency: 100` means 100ms between each SSE chunk, not 100ms total response time. Similarly, `truncateAfterChunks` and `disconnectAfterMs` are for simulating stream interruptions (added in v1.3.0).
 
@@ -611,7 +683,7 @@ const mock = await LLMock.create({ port: 0 }); // creates + starts in one call
 | `onModerate(pattern, result)`           | Match moderation requests by input          |
 | `onImage(pattern, response)`            | Match image generation by prompt            |
 | `onSpeech(pattern, response)`           | Match TTS by input text                     |
-| `onTranscription(match, response)`      | Match audio transcription                   |
+| `onTranscription(response)`             | Match audio transcription                   |
 | `onVideo(pattern, response)`            | Match video generation by prompt            |
 | `mount(path, handler)`                  | Mount a Mountable (VectorMock, etc.)        |
 | `url` / `baseUrl`                       | Server URL (throws if not started)          |

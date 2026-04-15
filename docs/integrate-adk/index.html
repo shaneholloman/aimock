@@ -138,7 +138,7 @@ client = genai.<span class="fn">Client</span>(
         <span class="prop">"toolCalls"</span>: [
           {
             <span class="prop">"name"</span>: <span class="str">"get_weather"</span>,
-            <span class="prop">"arguments"</span>: <span class="str">"{\"city\":\"San Francisco\",\"unit\":\"fahrenheit\"}"</span>
+            <span class="prop">"arguments"</span>: { <span class="prop">"city"</span>: <span class="str">"San Francisco"</span>, <span class="prop">"unit"</span>: <span class="str">"fahrenheit"</span> }
           }
         ]
       }

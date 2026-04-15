@@ -12,7 +12,7 @@
         "toolCalls": [
           {
             "name": "search_flights",
-            "arguments": "{\"origin\":\"SFO\",\"dest\":\"NRT\"}"
+            "arguments": { "origin": "SFO", "dest": "NRT" }
           }
         ]
       }

@@ -136,7 +136,7 @@ python agent.py</code></pre>
         <span class="prop">"toolCalls"</span>: [
           {
             <span class="prop">"name"</span>: <span class="str">"final_result"</span>,
-            <span class="prop">"arguments"</span>: <span class="str">"{\"city\": \"SF\", \"temp\": 72, \"unit\": \"fahrenheit\"}"</span>
+            <span class="prop">"arguments"</span>: { <span class="prop">"city"</span>: <span class="str">"SF"</span>, <span class="prop">"temp"</span>: <span class="num">72</span>, <span class="prop">"unit"</span>: <span class="str">"fahrenheit"</span> }
           }
         ]
       }
@@ -163,7 +163,7 @@ python agent.py</code></pre>
     {
       <span class="prop">"match"</span>: { <span class="prop">"responseFormat"</span>: <span class="str">"json_object"</span> },
       <span class="prop">"response"</span>: {
-        <span class="prop">"content"</span>: <span class="str">"{\"city\": \"SF\", \"temp\": 72, \"unit\": \"fahrenheit\"}"</span>
+        <span class="prop">"content"</span>: { <span class="prop">"city"</span>: <span class="str">"SF"</span>, <span class="prop">"temp"</span>: <span class="num">72</span>, <span class="prop">"unit"</span>: <span class="str">"fahrenheit"</span> }
       }
     }
   ]
@@ -218,7 +218,7 @@ result = agent.run_sync(<span class="str">"Weather in San Francisco"</span>)
         <span class="prop">"toolCalls"</span>: [
           {
             <span class="prop">"name"</span>: <span class="str">"get_weather"</span>,
-            <span class="prop">"arguments"</span>: <span class="str">"{\"city\": \"San Francisco\"}"</span>
+            <span class="prop">"arguments"</span>: { <span class="prop">"city"</span>: <span class="str">"San Francisco"</span> }
           }
         ]
       }

@@ -3,7 +3,7 @@
     {
       "match": { "userMessage": "change background to blue" },
       "response": {
-        "toolCalls": [{ "name": "change_background", "arguments": "{\"background\":\"blue\"}" }]
+        "toolCalls": [{ "name": "change_background", "arguments": { "background": "blue" } }]
       }
     },
     {

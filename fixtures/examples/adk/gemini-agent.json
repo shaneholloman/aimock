@@ -6,7 +6,7 @@
         "toolCalls": [
           {
             "name": "get_weather",
-            "arguments": "{\"city\":\"San Francisco\",\"unit\":\"fahrenheit\"}"
+            "arguments": { "city": "San Francisco", "unit": "fahrenheit" }
           }
         ]
       }
@@ -23,7 +23,7 @@
         "toolCalls": [
           {
             "name": "google_search",
-            "arguments": "{\"query\":\"latest AI news\"}"
+            "arguments": { "query": "latest AI news" }
           }
         ]
       }
@@ -34,11 +34,11 @@
         "toolCalls": [
           {
             "name": "get_weather",
-            "arguments": "{\"city\":\"New York\",\"unit\":\"celsius\"}"
+            "arguments": { "city": "New York", "unit": "celsius" }
           },
           {
             "name": "get_time",
-            "arguments": "{\"timezone\":\"America/New_York\"}"
+            "arguments": { "timezone": "America/New_York" }
           }
         ]
       }
