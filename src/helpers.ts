@@ -14,6 +14,7 @@ import type {
   SSEChunk,
   ToolCall,
   ChatCompletion,
+  ResponseOverrides,
 } from "./types.js";
 
 const REDACTED_HEADERS = new Set(["authorization", "x-api-key", "api-key"]);
@@ -48,11 +49,15 @@ export function generateToolUseId(): string {
 }
 
 export function isTextResponse(r: FixtureResponse): r is TextResponse {
-  return "content" in r && typeof (r as TextResponse).content === "string";
+  return "content" in r && typeof (r as TextResponse).content === "string" && !("toolCalls" in r);
 }
 
 export function isToolCallResponse(r: FixtureResponse): r is ToolCallResponse {
-  return "toolCalls" in r && Array.isArray((r as ToolCallResponse).toolCalls);
+  return (
+    "toolCalls" in r &&
+    Array.isArray((r as ToolCallResponse).toolCalls) &&
+    !("content" in r && typeof (r as unknown as Record<string, unknown>).content === "string")
+  );
 }
 
 export function isContentWithToolCallsResponse(
@@ -105,15 +110,33 @@ export function isVideoResponse(r: FixtureResponse): r is VideoResponse {
   );
 }
 
+export function extractOverrides(
+  response: TextResponse | ToolCallResponse | ContentWithToolCallsResponse,
+): ResponseOverrides {
+  const r = response;
+  return {
+    ...(r.id !== undefined && { id: r.id }),
+    ...(r.created !== undefined && { created: r.created }),
+    ...(r.model !== undefined && { model: r.model }),
+    ...(r.usage !== undefined && { usage: r.usage }),
+    ...(r.systemFingerprint !== undefined && { systemFingerprint: r.systemFingerprint }),
+    ...(r.finishReason !== undefined && { finishReason: r.finishReason }),
+    ...(r.role !== undefined && { role: r.role }),
+  };
+}
+
 export function buildTextChunks(
   content: string,
   model: string,
   chunkSize: number,
   reasoning?: string,
+  overrides?: ResponseOverrides,
 ): SSEChunk[] {
-  const id = generateId();
-  const created = Math.floor(Date.now() / 1000);
+  const id = overrides?.id ?? generateId();
+  const created = overrides?.created ?? Math.floor(Date.now() / 1000);
+  const effectiveModel = overrides?.model ?? model;
   const chunks: SSEChunk[] = [];
+  const fingerprint = overrides?.systemFingerprint;
 
   // Reasoning chunks (emitted before content, OpenRouter format)
   if (reasoning) {
@@ -123,8 +146,9 @@ export function buildTextChunks(
         id,
         object: "chat.completion.chunk",
         created,
-        model,
+        model: effectiveModel,
         choices: [{ index: 0, delta: { reasoning_content: slice }, finish_reason: null }],
+        ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
       });
     }
   }
@@ -134,8 +158,15 @@ export function buildTextChunks(
     id,
     object: "chat.completion.chunk",
     created,
-    model,
-    choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }],
+    model: effectiveModel,
+    choices: [
+      {
+        index: 0,
+        delta: { role: overrides?.role ?? "assistant", content: "" },
+        finish_reason: null,
+      },
+    ],
+    ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
   });
 
   // Content chunks
@@ -145,8 +176,9 @@ export function buildTextChunks(
       id,
       object: "chat.completion.chunk",
       created,
-      model,
+      model: effectiveModel,
       choices: [{ index: 0, delta: { content: slice }, finish_reason: null }],
+      ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
     });
   }
 
@@ -155,8 +187,9 @@ export function buildTextChunks(
     id,
     object: "chat.completion.chunk",
     created,
-    model,
-    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    model: effectiveModel,
+    choices: [{ index: 0, delta: {}, finish_reason: overrides?.finishReason ?? "stop" }],
+    ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
   });
 
   return chunks;
@@ -166,18 +199,28 @@ export function buildToolCallChunks(
   toolCalls: ToolCall[],
   model: string,
   chunkSize: number,
+  overrides?: ResponseOverrides,
 ): SSEChunk[] {
-  const id = generateId();
-  const created = Math.floor(Date.now() / 1000);
+  const id = overrides?.id ?? generateId();
+  const created = overrides?.created ?? Math.floor(Date.now() / 1000);
+  const effectiveModel = overrides?.model ?? model;
   const chunks: SSEChunk[] = [];
+  const fingerprint = overrides?.systemFingerprint;
 
   // Role chunk
   chunks.push({
     id,
     object: "chat.completion.chunk",
     created,
-    model,
-    choices: [{ index: 0, delta: { role: "assistant", content: null }, finish_reason: null }],
+    model: effectiveModel,
+    choices: [
+      {
+        index: 0,
+        delta: { role: overrides?.role ?? "assistant", content: null },
+        finish_reason: null,
+      },
+    ],
+    ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
   });
 
   // Tool call chunks — one initial chunk per tool call, then argument chunks
@@ -190,7 +233,7 @@ export function buildToolCallChunks(
       id,
       object: "chat.completion.chunk",
       created,
-      model,
+      model: effectiveModel,
       choices: [
         {
           index: 0,
@@ -207,6 +250,7 @@ export function buildToolCallChunks(
           finish_reason: null,
         },
       ],
+      ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
     });
 
     // Argument streaming chunks
@@ -217,7 +261,7 @@ export function buildToolCallChunks(
         id,
         object: "chat.completion.chunk",
         created,
-        model,
+        model: effectiveModel,
         choices: [
           {
             index: 0,
@@ -227,6 +271,7 @@ export function buildToolCallChunks(
             finish_reason: null,
           },
         ],
+        ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
       });
     }
   }
@@ -236,8 +281,9 @@ export function buildToolCallChunks(
     id,
     object: "chat.completion.chunk",
     created,
-    model,
-    choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+    model: effectiveModel,
+    choices: [{ index: 0, delta: {}, finish_reason: overrides?.finishReason ?? "tool_calls" }],
+    ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
   });
 
   return chunks;
@@ -249,39 +295,57 @@ export function buildTextCompletion(
   content: string,
   model: string,
   reasoning?: string,
+  overrides?: ResponseOverrides,
 ): ChatCompletion {
+  const defaultUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   return {
-    id: generateId(),
+    id: overrides?.id ?? generateId(),
     object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model,
+    created: overrides?.created ?? Math.floor(Date.now() / 1000),
+    model: overrides?.model ?? model,
     choices: [
       {
         index: 0,
         message: {
-          role: "assistant",
+          role: overrides?.role ?? "assistant",
           content,
           refusal: null,
           ...(reasoning ? { reasoning_content: reasoning } : {}),
         },
-        finish_reason: "stop",
+        finish_reason: overrides?.finishReason ?? "stop",
       },
     ],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    usage: overrides?.usage
+      ? {
+          prompt_tokens: overrides.usage.prompt_tokens ?? defaultUsage.prompt_tokens,
+          completion_tokens: overrides.usage.completion_tokens ?? defaultUsage.completion_tokens,
+          total_tokens:
+            overrides.usage.total_tokens ??
+            (overrides.usage.prompt_tokens ?? 0) + (overrides.usage.completion_tokens ?? 0),
+        }
+      : defaultUsage,
+    ...(overrides?.systemFingerprint !== undefined && {
+      system_fingerprint: overrides.systemFingerprint,
+    }),
   };
 }
 
-export function buildToolCallCompletion(toolCalls: ToolCall[], model: string): ChatCompletion {
+export function buildToolCallCompletion(
+  toolCalls: ToolCall[],
+  model: string,
+  overrides?: ResponseOverrides,
+): ChatCompletion {
+  const defaultUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   return {
-    id: generateId(),
+    id: overrides?.id ?? generateId(),
     object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model,
+    created: overrides?.created ?? Math.floor(Date.now() / 1000),
+    model: overrides?.model ?? model,
     choices: [
       {
         index: 0,
         message: {
-          role: "assistant",
+          role: overrides?.role ?? "assistant",
           content: null,
           refusal: null,
           tool_calls: toolCalls.map((tc) => ({
@@ -290,10 +354,21 @@ export function buildToolCallCompletion(toolCalls: ToolCall[], model: string): C
             function: { name: tc.name, arguments: tc.arguments },
           })),
         },
-        finish_reason: "tool_calls",
+        finish_reason: overrides?.finishReason ?? "tool_calls",
       },
     ],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    usage: overrides?.usage
+      ? {
+          prompt_tokens: overrides.usage.prompt_tokens ?? defaultUsage.prompt_tokens,
+          completion_tokens: overrides.usage.completion_tokens ?? defaultUsage.completion_tokens,
+          total_tokens:
+            overrides.usage.total_tokens ??
+            (overrides.usage.prompt_tokens ?? 0) + (overrides.usage.completion_tokens ?? 0),
+        }
+      : defaultUsage,
+    ...(overrides?.systemFingerprint !== undefined && {
+      system_fingerprint: overrides.systemFingerprint,
+    }),
   };
 }
 
@@ -302,18 +377,44 @@ export function buildContentWithToolCallsChunks(
   toolCalls: ToolCall[],
   model: string,
   chunkSize: number,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
 ): SSEChunk[] {
-  const id = generateId();
-  const created = Math.floor(Date.now() / 1000);
+  const id = overrides?.id ?? generateId();
+  const created = overrides?.created ?? Math.floor(Date.now() / 1000);
+  const effectiveModel = overrides?.model ?? model;
   const chunks: SSEChunk[] = [];
+  const fingerprint = overrides?.systemFingerprint;
+
+  // Reasoning chunks (emitted before content, OpenRouter format)
+  if (reasoning) {
+    for (let i = 0; i < reasoning.length; i += chunkSize) {
+      const slice = reasoning.slice(i, i + chunkSize);
+      chunks.push({
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model: effectiveModel,
+        choices: [{ index: 0, delta: { reasoning_content: slice }, finish_reason: null }],
+        ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
+      });
+    }
+  }
 
   // Role chunk
   chunks.push({
     id,
     object: "chat.completion.chunk",
     created,
-    model,
-    choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }],
+    model: effectiveModel,
+    choices: [
+      {
+        index: 0,
+        delta: { role: overrides?.role ?? "assistant", content: "" },
+        finish_reason: null,
+      },
+    ],
+    ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
   });
 
   // Content chunks
@@ -323,8 +424,9 @@ export function buildContentWithToolCallsChunks(
       id,
       object: "chat.completion.chunk",
       created,
-      model,
+      model: effectiveModel,
       choices: [{ index: 0, delta: { content: slice }, finish_reason: null }],
+      ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
     });
   }
 
@@ -338,7 +440,7 @@ export function buildContentWithToolCallsChunks(
       id,
       object: "chat.completion.chunk",
       created,
-      model,
+      model: effectiveModel,
       choices: [
         {
           index: 0,
@@ -355,6 +457,7 @@ export function buildContentWithToolCallsChunks(
           finish_reason: null,
         },
       ],
+      ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
     });
 
     // Argument streaming chunks
@@ -365,7 +468,7 @@ export function buildContentWithToolCallsChunks(
         id,
         object: "chat.completion.chunk",
         created,
-        model,
+        model: effectiveModel,
         choices: [
           {
             index: 0,
@@ -375,6 +478,7 @@ export function buildContentWithToolCallsChunks(
             finish_reason: null,
           },
         ],
+        ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
       });
     }
   }
@@ -384,8 +488,9 @@ export function buildContentWithToolCallsChunks(
     id,
     object: "chat.completion.chunk",
     created,
-    model,
-    choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+    model: effectiveModel,
+    choices: [{ index: 0, delta: {}, finish_reason: overrides?.finishReason ?? "tool_calls" }],
+    ...(fingerprint !== undefined && { system_fingerprint: fingerprint }),
   });
 
   return chunks;
@@ -395,29 +500,44 @@ export function buildContentWithToolCallsCompletion(
   content: string,
   toolCalls: ToolCall[],
   model: string,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
 ): ChatCompletion {
+  const defaultUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   return {
-    id: generateId(),
+    id: overrides?.id ?? generateId(),
     object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model,
+    created: overrides?.created ?? Math.floor(Date.now() / 1000),
+    model: overrides?.model ?? model,
     choices: [
       {
         index: 0,
         message: {
-          role: "assistant",
+          role: overrides?.role ?? "assistant",
           content,
           refusal: null,
+          ...(reasoning ? { reasoning_content: reasoning } : {}),
           tool_calls: toolCalls.map((tc) => ({
             id: tc.id || generateToolCallId(),
             type: "function" as const,
             function: { name: tc.name, arguments: tc.arguments },
           })),
         },
-        finish_reason: "tool_calls",
+        finish_reason: overrides?.finishReason ?? "tool_calls",
       },
     ],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    usage: overrides?.usage
+      ? {
+          prompt_tokens: overrides.usage.prompt_tokens ?? defaultUsage.prompt_tokens,
+          completion_tokens: overrides.usage.completion_tokens ?? defaultUsage.completion_tokens,
+          total_tokens:
+            overrides.usage.total_tokens ??
+            (overrides.usage.prompt_tokens ?? 0) + (overrides.usage.completion_tokens ?? 0),
+        }
+      : defaultUsage,
+    ...(overrides?.systemFingerprint !== undefined && {
+      system_fingerprint: overrides.systemFingerprint,
+    }),
   };
 }
 

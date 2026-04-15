@@ -77,12 +77,44 @@ export interface FixtureMatch {
 
 // Fixture response types
 
-export interface TextResponse {
+/**
+ * Fields that override auto-generated envelope values in the built response.
+ * Scalar fields (finishReason, role) use OpenAI-canonical values — provider
+ * handlers translate automatically. For usage, provide field names native to
+ * your target provider (OpenAI Chat: prompt_tokens, completion_tokens;
+ * Responses API: input_tokens, output_tokens; Anthropic: input_tokens,
+ * output_tokens; Gemini: promptTokenCount, candidatesTokenCount).
+ *
+ * When total_tokens (or provider equivalent) is omitted, it is auto-computed
+ * from the component fields.
+ *
+ * Provider support: OpenAI Chat (all 7), Responses API (5: no role,
+ * systemFingerprint), Claude (5: no created, systemFingerprint),
+ * Gemini (2: only finishReason, usage).
+ */
+export interface ResponseOverrides {
+  id?: string;
+  created?: number;
+  model?: string;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
+  systemFingerprint?: string;
+  finishReason?: string;
+  role?: string;
+}
+
+export interface TextResponse extends ResponseOverrides {
   content: string;
   reasoning?: string;
   webSearches?: string[];
-  role?: string;
-  finishReason?: string;
 }
 
 export interface ToolCall {
@@ -91,18 +123,15 @@ export interface ToolCall {
   id?: string;
 }
 
-export interface ToolCallResponse {
+export interface ToolCallResponse extends ResponseOverrides {
   toolCalls: ToolCall[];
-  finishReason?: string;
 }
 
-export interface ContentWithToolCallsResponse {
+export interface ContentWithToolCallsResponse extends ResponseOverrides {
   content: string;
   toolCalls: ToolCall[];
   reasoning?: string;
   webSearches?: string[];
-  role?: string;
-  finishReason?: string;
 }
 
 export interface ErrorResponse {
@@ -192,6 +221,48 @@ export type FixtureOpts = Omit<Fixture, "match" | "response">;
 export type EmbeddingFixtureOpts = Pick<FixtureOpts, "latency" | "chaos">;
 
 // Fixture file format (JSON on disk)
+//
+// File-entry types are intentionally relaxed compared to their runtime
+// counterparts so that fixture authors can write JSON objects where the
+// API ultimately expects a JSON *string*.  The fixture loader auto-
+// stringifies these before building the runtime Fixture.
+
+export interface FixtureFileToolCall {
+  name: string;
+  /** Accepts a JSON object or array for convenience — the loader will JSON.stringify it. */
+  arguments: string | Record<string, unknown> | unknown[];
+  id?: string;
+}
+
+export interface FixtureFileToolCallResponse extends ResponseOverrides {
+  toolCalls: FixtureFileToolCall[];
+}
+
+export interface FixtureFileTextResponse extends ResponseOverrides {
+  /** Accepts a JSON object or array (structured output) — the loader will JSON.stringify it. */
+  content: string | Record<string, unknown> | unknown[];
+  reasoning?: string;
+  webSearches?: string[];
+}
+
+export interface FixtureFileContentWithToolCallsResponse extends ResponseOverrides {
+  /** Accepts a JSON object or array (structured output) — the loader will JSON.stringify it. */
+  content: string | Record<string, unknown> | unknown[];
+  toolCalls: FixtureFileToolCall[];
+  reasoning?: string;
+  webSearches?: string[];
+}
+
+export type FixtureFileResponse =
+  | FixtureFileTextResponse
+  | FixtureFileToolCallResponse
+  | FixtureFileContentWithToolCallsResponse
+  | ErrorResponse
+  | EmbeddingResponse
+  | ImageResponse
+  | AudioResponse
+  | TranscriptionResponse
+  | VideoResponse;
 
 export interface FixtureFile {
   fixtures: FixtureFileEntry[];
@@ -209,7 +280,7 @@ export interface FixtureFileEntry {
     endpoint?: "chat" | "image" | "speech" | "transcription" | "video" | "embedding";
     // predicate not supported in JSON files
   };
-  response: FixtureResponse;
+  response: FixtureFileResponse;
   latency?: number;
   chunkSize?: number;
   truncateAfterChunks?: number;
@@ -245,6 +316,7 @@ export interface SSEChunk {
   created: number;
   model: string;
   choices: SSEChoice[];
+  system_fingerprint?: string;
 }
 
 export interface SSEChoice {
@@ -276,6 +348,7 @@ export interface ChatCompletion {
   model: string;
   choices: ChatCompletionChoice[];
   usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  system_fingerprint?: string;
 }
 
 export interface ChatCompletionChoice {
@@ -285,7 +358,7 @@ export interface ChatCompletionChoice {
 }
 
 export interface ChatCompletionMessage {
-  role: "assistant";
+  role: string;
   content: string | null;
   refusal: string | null;
   reasoning_content?: string;

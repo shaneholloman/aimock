@@ -13,6 +13,7 @@ import type {
   Fixture,
   HandlerDefaults,
   RecordProviderKey,
+  ResponseOverrides,
   StreamingProfile,
   ToolCall,
   ToolDefinition,
@@ -22,6 +23,7 @@ import {
   isToolCallResponse,
   isContentWithToolCallsResponse,
   isErrorResponse,
+  extractOverrides,
   generateToolCallId,
   flattenHeaders,
   getTestId,
@@ -177,6 +179,33 @@ export function geminiToCompletionRequest(
 
 // ─── Response building: fixture → Gemini format ─────────────────────────────
 
+function geminiFinishReason(finishReason: string | undefined, defaultReason: string): string {
+  if (!finishReason) return defaultReason;
+  if (finishReason === "stop") return "STOP";
+  if (finishReason === "tool_calls") return "FUNCTION_CALL";
+  if (finishReason === "length") return "MAX_TOKENS";
+  if (finishReason === "content_filter") return "SAFETY";
+  // Pass through unrecognized values as-is
+  return finishReason;
+}
+
+function geminiUsageMetadata(overrides?: ResponseOverrides): {
+  promptTokenCount: number;
+  candidatesTokenCount: number;
+  totalTokenCount: number;
+} {
+  if (!overrides?.usage)
+    return { promptTokenCount: 0, candidatesTokenCount: 0, totalTokenCount: 0 };
+  const prompt = overrides.usage.promptTokenCount ?? 0;
+  const candidates = overrides.usage.candidatesTokenCount ?? 0;
+  const total = overrides.usage.totalTokenCount ?? prompt + candidates;
+  return {
+    promptTokenCount: prompt,
+    candidatesTokenCount: candidates,
+    totalTokenCount: total,
+  };
+}
+
 interface GeminiResponseChunk {
   candidates: {
     content: { role: string; parts: GeminiPart[] };
@@ -194,8 +223,11 @@ function buildGeminiTextStreamChunks(
   content: string,
   chunkSize: number,
   reasoning?: string,
+  overrides?: ResponseOverrides,
 ): GeminiResponseChunk[] {
   const chunks: GeminiResponseChunk[] = [];
+  const effectiveFinish = geminiFinishReason(overrides?.finishReason, "STOP");
+  const usage = geminiUsageMetadata(overrides);
 
   // Reasoning chunks (thought: true)
   if (reasoning) {
@@ -212,7 +244,7 @@ function buildGeminiTextStreamChunks(
     }
   }
 
-  // Content chunks (original logic unchanged)
+  // Content chunks
   for (let i = 0; i < content.length; i += chunkSize) {
     const slice = content.slice(i, i + chunkSize);
     const isLast = i + chunkSize >= content.length;
@@ -221,37 +253,25 @@ function buildGeminiTextStreamChunks(
         {
           content: { role: "model", parts: [{ text: slice }] },
           index: 0,
-          ...(isLast ? { finishReason: "STOP" } : {}),
+          ...(isLast ? { finishReason: effectiveFinish } : {}),
         },
       ],
-      ...(isLast
-        ? {
-            usageMetadata: {
-              promptTokenCount: 0,
-              candidatesTokenCount: 0,
-              totalTokenCount: 0,
-            },
-          }
-        : {}),
+      ...(isLast ? { usageMetadata: usage } : {}),
     };
     chunks.push(chunk);
   }
 
-  // Handle empty content (original logic unchanged)
+  // Handle empty content
   if (content.length === 0) {
     chunks.push({
       candidates: [
         {
           content: { role: "model", parts: [{ text: "" }] },
-          finishReason: "STOP",
+          finishReason: effectiveFinish,
           index: 0,
         },
       ],
-      usageMetadata: {
-        promptTokenCount: 0,
-        candidatesTokenCount: 0,
-        totalTokenCount: 0,
-      },
+      usageMetadata: usage,
     });
   }
 
@@ -272,6 +292,7 @@ function parseToolCallPart(tc: ToolCall, logger: Logger): GeminiPart {
 function buildGeminiToolCallStreamChunks(
   toolCalls: ToolCall[],
   logger: Logger,
+  overrides?: ResponseOverrides,
 ): GeminiResponseChunk[] {
   const parts: GeminiPart[] = toolCalls.map((tc) => parseToolCallPart(tc, logger));
 
@@ -281,22 +302,22 @@ function buildGeminiToolCallStreamChunks(
       candidates: [
         {
           content: { role: "model", parts },
-          finishReason: "FUNCTION_CALL",
+          finishReason: geminiFinishReason(overrides?.finishReason, "FUNCTION_CALL"),
           index: 0,
         },
       ],
-      usageMetadata: {
-        promptTokenCount: 0,
-        candidatesTokenCount: 0,
-        totalTokenCount: 0,
-      },
+      usageMetadata: geminiUsageMetadata(overrides),
     },
   ];
 }
 
 // Non-streaming response builders
 
-function buildGeminiTextResponse(content: string, reasoning?: string): GeminiResponseChunk {
+function buildGeminiTextResponse(
+  content: string,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
+): GeminiResponseChunk {
   const parts: GeminiPart[] = [];
   if (reasoning) {
     parts.push({ text: reasoning, thought: true });
@@ -307,34 +328,30 @@ function buildGeminiTextResponse(content: string, reasoning?: string): GeminiRes
     candidates: [
       {
         content: { role: "model", parts },
-        finishReason: "STOP",
+        finishReason: geminiFinishReason(overrides?.finishReason, "STOP"),
         index: 0,
       },
     ],
-    usageMetadata: {
-      promptTokenCount: 0,
-      candidatesTokenCount: 0,
-      totalTokenCount: 0,
-    },
+    usageMetadata: geminiUsageMetadata(overrides),
   };
 }
 
-function buildGeminiToolCallResponse(toolCalls: ToolCall[], logger: Logger): GeminiResponseChunk {
+function buildGeminiToolCallResponse(
+  toolCalls: ToolCall[],
+  logger: Logger,
+  overrides?: ResponseOverrides,
+): GeminiResponseChunk {
   const parts: GeminiPart[] = toolCalls.map((tc) => parseToolCallPart(tc, logger));
 
   return {
     candidates: [
       {
         content: { role: "model", parts },
-        finishReason: "FUNCTION_CALL",
+        finishReason: geminiFinishReason(overrides?.finishReason, "FUNCTION_CALL"),
         index: 0,
       },
     ],
-    usageMetadata: {
-      promptTokenCount: 0,
-      candidatesTokenCount: 0,
-      totalTokenCount: 0,
-    },
+    usageMetadata: geminiUsageMetadata(overrides),
   };
 }
 
@@ -343,8 +360,25 @@ function buildGeminiContentWithToolCallsStreamChunks(
   toolCalls: ToolCall[],
   chunkSize: number,
   logger: Logger,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
 ): GeminiResponseChunk[] {
   const chunks: GeminiResponseChunk[] = [];
+
+  // Reasoning chunks (thought: true)
+  if (reasoning) {
+    for (let i = 0; i < reasoning.length; i += chunkSize) {
+      const slice = reasoning.slice(i, i + chunkSize);
+      chunks.push({
+        candidates: [
+          {
+            content: { role: "model", parts: [{ text: slice, thought: true }] },
+            index: 0,
+          },
+        ],
+      });
+    }
+  }
 
   if (content.length === 0) {
     chunks.push({
@@ -375,15 +409,11 @@ function buildGeminiContentWithToolCallsStreamChunks(
     candidates: [
       {
         content: { role: "model", parts },
-        finishReason: "FUNCTION_CALL",
+        finishReason: geminiFinishReason(overrides?.finishReason, "FUNCTION_CALL"),
         index: 0,
       },
     ],
-    usageMetadata: {
-      promptTokenCount: 0,
-      candidatesTokenCount: 0,
-      totalTokenCount: 0,
-    },
+    usageMetadata: geminiUsageMetadata(overrides),
   });
 
   return chunks;
@@ -393,25 +423,25 @@ function buildGeminiContentWithToolCallsResponse(
   content: string,
   toolCalls: ToolCall[],
   logger: Logger,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
 ): GeminiResponseChunk {
-  const parts: GeminiPart[] = [
-    { text: content },
-    ...toolCalls.map((tc) => parseToolCallPart(tc, logger)),
-  ];
+  const parts: GeminiPart[] = [];
+  if (reasoning) {
+    parts.push({ text: reasoning, thought: true });
+  }
+  parts.push({ text: content });
+  parts.push(...toolCalls.map((tc) => parseToolCallPart(tc, logger)));
 
   return {
     candidates: [
       {
         content: { role: "model", parts },
-        finishReason: "FUNCTION_CALL",
+        finishReason: geminiFinishReason(overrides?.finishReason, "FUNCTION_CALL"),
         index: 0,
       },
     ],
-    usageMetadata: {
-      promptTokenCount: 0,
-      candidatesTokenCount: 0,
-      totalTokenCount: 0,
-    },
+    usageMetadata: geminiUsageMetadata(overrides),
   };
 }
 
@@ -617,6 +647,10 @@ export async function handleGemini(
 
   // Content + tool calls response (must be checked before isTextResponse / isToolCallResponse)
   if (isContentWithToolCallsResponse(response)) {
+    if (response.webSearches?.length) {
+      logger.warn("webSearches in fixture response are not supported for Gemini API — ignoring");
+    }
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path,
@@ -629,6 +663,8 @@ export async function handleGemini(
         response.content,
         response.toolCalls,
         logger,
+        response.reasoning,
+        overrides,
       );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
@@ -638,6 +674,8 @@ export async function handleGemini(
         response.toolCalls,
         chunkSize,
         logger,
+        response.reasoning,
+        overrides,
       );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeGeminiSSEStream(res, chunks, {
@@ -658,6 +696,10 @@ export async function handleGemini(
 
   // Text response
   if (isTextResponse(response)) {
+    if (response.webSearches?.length) {
+      logger.warn("webSearches in fixture response are not supported for Gemini API — ignoring");
+    }
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path,
@@ -666,11 +708,16 @@ export async function handleGemini(
       response: { status: 200, fixture },
     });
     if (!streaming) {
-      const body = buildGeminiTextResponse(response.content, response.reasoning);
+      const body = buildGeminiTextResponse(response.content, response.reasoning, overrides);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     } else {
-      const chunks = buildGeminiTextStreamChunks(response.content, chunkSize, response.reasoning);
+      const chunks = buildGeminiTextStreamChunks(
+        response.content,
+        chunkSize,
+        response.reasoning,
+        overrides,
+      );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeGeminiSSEStream(res, chunks, {
         latency,
@@ -690,6 +737,7 @@ export async function handleGemini(
 
   // Tool call response
   if (isToolCallResponse(response)) {
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path,
@@ -698,11 +746,11 @@ export async function handleGemini(
       response: { status: 200, fixture },
     });
     if (!streaming) {
-      const body = buildGeminiToolCallResponse(response.toolCalls, logger);
+      const body = buildGeminiToolCallResponse(response.toolCalls, logger, overrides);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     } else {
-      const chunks = buildGeminiToolCallStreamChunks(response.toolCalls, logger);
+      const chunks = buildGeminiToolCallStreamChunks(response.toolCalls, logger, overrides);
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeGeminiSSEStream(res, chunks, {
         latency,

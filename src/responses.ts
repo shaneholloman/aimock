@@ -12,6 +12,7 @@ import type {
   ChatMessage,
   Fixture,
   HandlerDefaults,
+  ResponseOverrides,
   StreamingProfile,
   ToolCall,
   ToolDefinition,
@@ -19,6 +20,7 @@ import type {
 import {
   generateId,
   generateToolCallId,
+  extractOverrides,
   isTextResponse,
   isToolCallResponse,
   isContentWithToolCallsResponse,
@@ -148,6 +150,30 @@ export function responsesToCompletionRequest(req: ResponsesRequest): ChatComplet
 
 // ─── Response building: fixture → Responses API format ──────────────────────
 
+function responsesStatus(finishReason: string | undefined, defaultStatus: string): string {
+  if (!finishReason) return defaultStatus;
+  if (finishReason === "stop") return "completed";
+  if (finishReason === "tool_calls") return "completed";
+  if (finishReason === "length") return "incomplete";
+  if (finishReason === "content_filter") return "failed";
+  return finishReason;
+}
+
+function responsesUsage(overrides?: ResponseOverrides): {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+} {
+  if (!overrides?.usage) return { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+  return {
+    input_tokens: overrides.usage.input_tokens ?? 0,
+    output_tokens: overrides.usage.output_tokens ?? 0,
+    total_tokens:
+      overrides.usage.total_tokens ??
+      (overrides.usage.input_tokens ?? 0) + (overrides.usage.output_tokens ?? 0),
+  };
+}
+
 function responseId(): string {
   return generateId("resp");
 }
@@ -169,12 +195,14 @@ export function buildTextStreamEvents(
   chunkSize: number,
   reasoning?: string,
   webSearches?: string[],
+  overrides?: ResponseOverrides,
 ): ResponsesSSEEvent[] {
   const { respId, created, events, prefixOutputItems, nextOutputIndex } = buildResponsePreamble(
     model,
     chunkSize,
     reasoning,
     webSearches,
+    overrides,
   );
 
   const { events: msgEvents, msgItem } = buildMessageOutputEvents(
@@ -190,10 +218,10 @@ export function buildTextStreamEvents(
       id: respId,
       object: "response",
       created_at: created,
-      model,
-      status: "completed",
+      model: overrides?.model ?? model,
+      status: responsesStatus(overrides?.finishReason, "completed"),
       output: [...prefixOutputItems, msgItem],
-      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      usage: responsesUsage(overrides),
     },
   });
 
@@ -204,9 +232,11 @@ export function buildToolCallStreamEvents(
   toolCalls: ToolCall[],
   model: string,
   chunkSize: number,
+  overrides?: ResponseOverrides,
 ): ResponsesSSEEvent[] {
-  const respId = responseId();
-  const created = Math.floor(Date.now() / 1000);
+  const respId = overrides?.id ?? responseId();
+  const created = overrides?.created ?? Math.floor(Date.now() / 1000);
+  const effectiveModel = overrides?.model ?? model;
   const events: ResponsesSSEEvent[] = [];
 
   // response.created
@@ -216,7 +246,7 @@ export function buildToolCallStreamEvents(
       id: respId,
       object: "response",
       created_at: created,
-      model,
+      model: effectiveModel,
       status: "in_progress",
       output: [],
     },
@@ -228,7 +258,7 @@ export function buildToolCallStreamEvents(
       id: respId,
       object: "response",
       created_at: created,
-      model,
+      model: effectiveModel,
       status: "in_progress",
       output: [],
     },
@@ -300,14 +330,10 @@ export function buildToolCallStreamEvents(
       id: respId,
       object: "response",
       created_at: created,
-      model,
-      status: "completed",
+      model: effectiveModel,
+      status: responsesStatus(overrides?.finishReason, "completed"),
       output: outputItems,
-      usage: {
-        input_tokens: 0,
-        output_tokens: 0,
-        total_tokens: 0,
-      },
+      usage: responsesUsage(overrides),
     },
   });
 
@@ -428,9 +454,11 @@ function buildResponsePreamble(
   chunkSize: number,
   reasoning?: string,
   webSearches?: string[],
+  overrides?: ResponseOverrides,
 ): PreambleResult {
-  const respId = responseId();
-  const created = Math.floor(Date.now() / 1000);
+  const respId = overrides?.id ?? responseId();
+  const created = overrides?.created ?? Math.floor(Date.now() / 1000);
+  const effectiveModel = overrides?.model ?? model;
   const events: ResponsesSSEEvent[] = [];
   const prefixOutputItems: object[] = [];
   let nextOutputIndex = 0;
@@ -441,7 +469,7 @@ function buildResponsePreamble(
       id: respId,
       object: "response",
       created_at: created,
-      model,
+      model: effectiveModel,
       status: "in_progress",
       output: [],
     },
@@ -452,7 +480,7 @@ function buildResponsePreamble(
       id: respId,
       object: "response",
       created_at: created,
-      model,
+      model: effectiveModel,
       status: "in_progress",
       output: [],
     },
@@ -581,15 +609,19 @@ function buildOutputPrefix(content: string, reasoning?: string, webSearches?: st
   return output;
 }
 
-function buildResponseEnvelope(model: string, output: object[]): object {
+function buildResponseEnvelope(
+  model: string,
+  output: object[],
+  overrides?: ResponseOverrides,
+): object {
   return {
-    id: responseId(),
+    id: overrides?.id ?? responseId(),
     object: "response",
-    created_at: Math.floor(Date.now() / 1000),
-    model,
-    status: "completed",
+    created_at: overrides?.created ?? Math.floor(Date.now() / 1000),
+    model: overrides?.model ?? model,
+    status: responsesStatus(overrides?.finishReason, "completed"),
     output,
-    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    usage: responsesUsage(overrides),
   };
 }
 
@@ -598,11 +630,20 @@ function buildTextResponse(
   model: string,
   reasoning?: string,
   webSearches?: string[],
+  overrides?: ResponseOverrides,
 ): object {
-  return buildResponseEnvelope(model, buildOutputPrefix(content, reasoning, webSearches));
+  return buildResponseEnvelope(
+    model,
+    buildOutputPrefix(content, reasoning, webSearches),
+    overrides,
+  );
 }
 
-function buildToolCallResponse(toolCalls: ToolCall[], model: string): object {
+function buildToolCallResponse(
+  toolCalls: ToolCall[],
+  model: string,
+  overrides?: ResponseOverrides,
+): object {
   return buildResponseEnvelope(
     model,
     toolCalls.map((tc) => ({
@@ -613,6 +654,7 @@ function buildToolCallResponse(toolCalls: ToolCall[], model: string): object {
       arguments: tc.arguments,
       status: "completed",
     })),
+    overrides,
   );
 }
 
@@ -623,12 +665,14 @@ export function buildContentWithToolCallsStreamEvents(
   chunkSize: number,
   reasoning?: string,
   webSearches?: string[],
+  overrides?: ResponseOverrides,
 ): ResponsesSSEEvent[] {
   const { respId, created, events, prefixOutputItems, nextOutputIndex } = buildResponsePreamble(
     model,
     chunkSize,
     reasoning,
     webSearches,
+    overrides,
   );
 
   const { events: msgEvents, msgItem } = buildMessageOutputEvents(
@@ -692,10 +736,10 @@ export function buildContentWithToolCallsStreamEvents(
       id: respId,
       object: "response",
       created_at: created,
-      model,
-      status: "completed",
+      model: overrides?.model ?? model,
+      status: responsesStatus(overrides?.finishReason, "completed"),
       output: [...prefixOutputItems, msgItem, ...fcOutputItems],
-      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      usage: responsesUsage(overrides),
     },
   });
 
@@ -708,6 +752,7 @@ function buildContentWithToolCallsResponse(
   model: string,
   reasoning?: string,
   webSearches?: string[],
+  overrides?: ResponseOverrides,
 ): object {
   const output = buildOutputPrefix(content, reasoning, webSearches);
   for (const tc of toolCalls) {
@@ -720,7 +765,7 @@ function buildContentWithToolCallsResponse(
       status: "completed",
     });
   }
-  return buildResponseEnvelope(model, output);
+  return buildResponseEnvelope(model, output, overrides);
 }
 
 // ─── SSE writer for Responses API ───────────────────────────────────────────
@@ -909,6 +954,7 @@ export async function handleResponses(
 
   // Combined content + tool calls response
   if (isContentWithToolCallsResponse(response)) {
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? "/v1/responses",
@@ -923,6 +969,7 @@ export async function handleResponses(
         completionReq.model,
         response.reasoning,
         response.webSearches,
+        overrides,
       );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
@@ -934,6 +981,7 @@ export async function handleResponses(
         chunkSize,
         response.reasoning,
         response.webSearches,
+        overrides,
       );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeResponsesSSEStream(res, events, {
@@ -954,6 +1002,7 @@ export async function handleResponses(
 
   // Text response
   if (isTextResponse(response)) {
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? "/v1/responses",
@@ -967,6 +1016,7 @@ export async function handleResponses(
         completionReq.model,
         response.reasoning,
         response.webSearches,
+        overrides,
       );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
@@ -977,6 +1027,7 @@ export async function handleResponses(
         chunkSize,
         response.reasoning,
         response.webSearches,
+        overrides,
       );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeResponsesSSEStream(res, events, {
@@ -997,6 +1048,7 @@ export async function handleResponses(
 
   // Tool call response
   if (isToolCallResponse(response)) {
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? "/v1/responses",
@@ -1005,11 +1057,16 @@ export async function handleResponses(
       response: { status: 200, fixture },
     });
     if (responsesReq.stream !== true) {
-      const body = buildToolCallResponse(response.toolCalls, completionReq.model);
+      const body = buildToolCallResponse(response.toolCalls, completionReq.model, overrides);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     } else {
-      const events = buildToolCallStreamEvents(response.toolCalls, completionReq.model, chunkSize);
+      const events = buildToolCallStreamEvents(
+        response.toolCalls,
+        completionReq.model,
+        chunkSize,
+        overrides,
+      );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeResponsesSSEStream(res, events, {
         latency,

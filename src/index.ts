@@ -5,7 +5,12 @@ export { LLMock } from "./llmock.js";
 export { createServer, type ServerInstance } from "./server.js";
 
 // Fixture loading
-export { loadFixtureFile, loadFixturesFromDir, validateFixtures } from "./fixture-loader.js";
+export {
+  loadFixtureFile,
+  loadFixturesFromDir,
+  validateFixtures,
+  normalizeResponse,
+} from "./fixture-loader.js";
 export type { ValidationResult } from "./fixture-loader.js";
 
 // Logger
@@ -85,6 +90,15 @@ export {
   generateToolUseId,
   buildTextChunks,
   buildToolCallChunks,
+  buildContentWithToolCallsChunks,
+  buildTextCompletion,
+  buildToolCallCompletion,
+  buildContentWithToolCallsCompletion,
+  extractOverrides,
+  isTextResponse,
+  isToolCallResponse,
+  isContentWithToolCallsResponse,
+  isErrorResponse,
   isEmbeddingResponse,
   isImageResponse,
   isAudioResponse,
@@ -265,4 +279,11 @@ export type {
   AudioResponse,
   TranscriptionResponse,
   VideoResponse,
+  ResponseOverrides,
+  ContentWithToolCallsResponse,
+  FixtureFileResponse,
+  FixtureFileToolCall,
+  FixtureFileTextResponse,
+  FixtureFileToolCallResponse,
+  FixtureFileContentWithToolCallsResponse,
 } from "./types.js";

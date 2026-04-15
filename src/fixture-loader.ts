@@ -1,13 +1,52 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { Fixture, FixtureFile, FixtureFileEntry } from "./types.js";
+import type {
+  Fixture,
+  FixtureFile,
+  FixtureFileEntry,
+  FixtureFileResponse,
+  FixtureResponse,
+  ResponseOverrides,
+} from "./types.js";
 import {
   isTextResponse,
   isToolCallResponse,
+  isContentWithToolCallsResponse,
   isErrorResponse,
   isEmbeddingResponse,
+  isImageResponse,
+  isAudioResponse,
+  isTranscriptionResponse,
+  isVideoResponse,
 } from "./helpers.js";
 import type { Logger } from "./logger.js";
+
+/**
+ * Auto-stringify object-valued `content` and `toolCalls[].arguments` fields.
+ * This lets fixture authors write plain JSON objects instead of escaped strings.
+ * All other fields (including ResponseOverrides) pass through unmodified.
+ */
+export function normalizeResponse(raw: FixtureFileResponse): FixtureResponse {
+  // Shallow-clone so we don't mutate the parsed JSON input.
+  const response = { ...raw } as Record<string, unknown>;
+
+  // Auto-stringify object content (e.g. structured output)
+  if (typeof response.content === "object" && response.content !== null) {
+    response.content = JSON.stringify(response.content);
+  }
+
+  // Auto-stringify object arguments in toolCalls
+  if (Array.isArray(response.toolCalls)) {
+    response.toolCalls = (response.toolCalls as Array<Record<string, unknown>>).map((tc) => {
+      if (typeof tc.arguments === "object" && tc.arguments !== null) {
+        return { ...tc, arguments: JSON.stringify(tc.arguments) };
+      }
+      return tc;
+    });
+  }
+
+  return response as unknown as FixtureResponse;
+}
 
 export function entryToFixture(entry: FixtureFileEntry): Fixture {
   return {
@@ -21,7 +60,7 @@ export function entryToFixture(entry: FixtureFileEntry): Fixture {
       endpoint: entry.match.endpoint,
       ...(entry.match.sequenceIndex !== undefined && { sequenceIndex: entry.match.sequenceIndex }),
     },
-    response: entry.response,
+    response: normalizeResponse(entry.response),
     ...(entry.latency !== undefined && { latency: entry.latency }),
     ...(entry.chunkSize !== undefined && { chunkSize: entry.chunkSize }),
     ...(entry.truncateAfterChunks !== undefined && {
@@ -120,6 +159,68 @@ export interface ValidationResult {
   message: string;
 }
 
+function validateReasoning(
+  response: { reasoning?: unknown },
+  fixtureIndex: number,
+  results: ValidationResult[],
+): void {
+  if (response.reasoning !== undefined) {
+    if (typeof response.reasoning !== "string") {
+      results.push({
+        severity: "error",
+        fixtureIndex,
+        message: "reasoning must be a string",
+      });
+    } else if (response.reasoning === "") {
+      results.push({
+        severity: "warning",
+        fixtureIndex,
+        message: "reasoning is empty string — no reasoning events will be emitted",
+      });
+    }
+  }
+}
+
+function validateWebSearches(
+  response: { webSearches?: unknown },
+  fixtureIndex: number,
+  results: ValidationResult[],
+): void {
+  if (response.webSearches !== undefined) {
+    if (!Array.isArray(response.webSearches)) {
+      results.push({
+        severity: "error",
+        fixtureIndex,
+        message: "webSearches must be an array of strings",
+      });
+    } else if (response.webSearches.length === 0) {
+      results.push({
+        severity: "warning",
+        fixtureIndex,
+        message: "webSearches is empty array — no web search events will be emitted",
+      });
+    } else {
+      for (let j = 0; j < response.webSearches.length; j++) {
+        if (typeof response.webSearches[j] !== "string") {
+          results.push({
+            severity: "error",
+            fixtureIndex,
+            message: `webSearches[${j}] is not a string`,
+          });
+          break;
+        }
+        if (response.webSearches[j] === "") {
+          results.push({
+            severity: "warning",
+            fixtureIndex,
+            message: `webSearches[${j}] is empty string`,
+          });
+        }
+      }
+    }
+  }
+}
+
 export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
   const results: ValidationResult[] = [];
 
@@ -132,17 +233,24 @@ export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
     // --- Error checks ---
 
     // Response type recognition
+    // Note: isContentWithToolCallsResponse must be checked before isTextResponse
+    // and isToolCallResponse since it is a structural superset of both.
     if (
+      !isContentWithToolCallsResponse(response) &&
       !isTextResponse(response) &&
       !isToolCallResponse(response) &&
       !isErrorResponse(response) &&
-      !isEmbeddingResponse(response)
+      !isEmbeddingResponse(response) &&
+      !isImageResponse(response) &&
+      !isAudioResponse(response) &&
+      !isTranscriptionResponse(response) &&
+      !isVideoResponse(response)
     ) {
       results.push({
         severity: "error",
         fixtureIndex: i,
         message:
-          "response is not a recognized type (must have content, toolCalls, error, or embedding)",
+          "response is not a recognized type (must have content, toolCalls, error, embedding, image, audio, transcription, or video)",
       });
     }
 
@@ -155,54 +263,47 @@ export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
           message: "content is empty string",
         });
       }
-      if (response.reasoning !== undefined) {
-        if (typeof response.reasoning !== "string") {
+      validateReasoning(response, i, results);
+      validateWebSearches(response, i, results);
+    }
+
+    // ContentWithToolCalls response checks
+    if (isContentWithToolCallsResponse(response)) {
+      if (response.content === "") {
+        results.push({
+          severity: "error",
+          fixtureIndex: i,
+          message: "content is empty string",
+        });
+      }
+      if (response.toolCalls.length === 0) {
+        results.push({
+          severity: "warning",
+          fixtureIndex: i,
+          message: "toolCalls array is empty — fixture will never produce tool calls",
+        });
+      }
+      for (let j = 0; j < response.toolCalls.length; j++) {
+        const tc = response.toolCalls[j];
+        if (!tc.name) {
           results.push({
             severity: "error",
             fixtureIndex: i,
-            message: "reasoning must be a string",
-          });
-        } else if (response.reasoning === "") {
-          results.push({
-            severity: "warning",
-            fixtureIndex: i,
-            message: "reasoning is empty string — no reasoning events will be emitted",
+            message: `toolCalls[${j}].name is empty`,
           });
         }
-      }
-      if (response.webSearches !== undefined) {
-        if (!Array.isArray(response.webSearches)) {
+        try {
+          JSON.parse(tc.arguments);
+        } catch {
           results.push({
             severity: "error",
             fixtureIndex: i,
-            message: "webSearches must be an array of strings",
+            message: `toolCalls[${j}].arguments is not valid JSON: ${tc.arguments}`,
           });
-        } else if (response.webSearches.length === 0) {
-          results.push({
-            severity: "warning",
-            fixtureIndex: i,
-            message: "webSearches is empty array — no web search events will be emitted",
-          });
-        } else {
-          for (let j = 0; j < response.webSearches.length; j++) {
-            if (typeof response.webSearches[j] !== "string") {
-              results.push({
-                severity: "error",
-                fixtureIndex: i,
-                message: `webSearches[${j}] is not a string`,
-              });
-              break;
-            }
-            if (response.webSearches[j] === "") {
-              results.push({
-                severity: "warning",
-                fixtureIndex: i,
-                message: `webSearches[${j}] is empty string`,
-              });
-            }
-          }
         }
       }
+      validateReasoning(response, i, results);
+      validateWebSearches(response, i, results);
     }
 
     // Tool call response checks
@@ -270,6 +371,78 @@ export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
             message: `embedding[${j}] is not a number`,
           });
           break; // one error is enough
+        }
+      }
+    }
+
+    // Validate ResponseOverrides fields
+    if (
+      isTextResponse(response) ||
+      isToolCallResponse(response) ||
+      isContentWithToolCallsResponse(response)
+    ) {
+      const r = response as ResponseOverrides;
+      if (r.id !== undefined && typeof r.id !== "string") {
+        results.push({
+          severity: "error",
+          fixtureIndex: i,
+          message: `override "id" must be a string, got ${typeof r.id}`,
+        });
+      }
+      if (r.created !== undefined && (typeof r.created !== "number" || r.created < 0)) {
+        results.push({
+          severity: "error",
+          fixtureIndex: i,
+          message: `override "created" must be a non-negative number`,
+        });
+      }
+      if (r.model !== undefined && typeof r.model !== "string") {
+        results.push({
+          severity: "error",
+          fixtureIndex: i,
+          message: `override "model" must be a string, got ${typeof r.model}`,
+        });
+      }
+      if (r.finishReason !== undefined && typeof r.finishReason !== "string") {
+        results.push({
+          severity: "error",
+          fixtureIndex: i,
+          message: `override "finishReason" must be a string, got ${typeof r.finishReason}`,
+        });
+      }
+      if (r.role !== undefined && typeof r.role !== "string") {
+        results.push({
+          severity: "error",
+          fixtureIndex: i,
+          message: `override "role" must be a string, got ${typeof r.role}`,
+        });
+      }
+      if (r.systemFingerprint !== undefined && typeof r.systemFingerprint !== "string") {
+        results.push({
+          severity: "error",
+          fixtureIndex: i,
+          message: `override "systemFingerprint" must be a string, got ${typeof r.systemFingerprint}`,
+        });
+      }
+      if (r.usage !== undefined) {
+        if (typeof r.usage !== "object" || r.usage === null || Array.isArray(r.usage)) {
+          results.push({
+            severity: "error",
+            fixtureIndex: i,
+            message: `override "usage" must be an object`,
+          });
+        } else {
+          // Check all known usage fields are numbers if present
+          for (const key of Object.keys(r.usage)) {
+            const val = (r.usage as Record<string, unknown>)[key];
+            if (val !== undefined && typeof val !== "number") {
+              results.push({
+                severity: "error",
+                fixtureIndex: i,
+                message: `override "usage.${key}" must be a number, got ${typeof val}`,
+              });
+            }
+          }
         }
       }
     }

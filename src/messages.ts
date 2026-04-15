@@ -12,6 +12,7 @@ import type {
   ChatMessage,
   Fixture,
   HandlerDefaults,
+  ResponseOverrides,
   StreamingProfile,
   ToolCall,
   ToolDefinition,
@@ -19,6 +20,7 @@ import type {
 import {
   generateMessageId,
   generateToolUseId,
+  extractOverrides,
   isTextResponse,
   isToolCallResponse,
   isContentWithToolCallsResponse,
@@ -191,6 +193,25 @@ export function claudeToCompletionRequest(req: ClaudeRequest): ChatCompletionReq
 
 // ─── Response building: fixture → Claude Messages API format ────────────────
 
+function claudeStopReason(finishReason: string | undefined, defaultReason: string): string {
+  if (!finishReason) return defaultReason;
+  if (finishReason === "stop") return "end_turn";
+  if (finishReason === "tool_calls") return "tool_use";
+  if (finishReason === "length") return "max_tokens";
+  return finishReason;
+}
+
+function claudeUsage(overrides?: ResponseOverrides): {
+  input_tokens: number;
+  output_tokens: number;
+} {
+  if (!overrides?.usage) return { input_tokens: 0, output_tokens: 0 };
+  return {
+    input_tokens: overrides.usage.input_tokens ?? 0,
+    output_tokens: overrides.usage.output_tokens ?? 0,
+  };
+}
+
 interface ClaudeSSEEvent {
   type: string;
   [key: string]: unknown;
@@ -201,8 +222,10 @@ function buildClaudeTextStreamEvents(
   model: string,
   chunkSize: number,
   reasoning?: string,
+  overrides?: ResponseOverrides,
 ): ClaudeSSEEvent[] {
-  const msgId = generateMessageId();
+  const msgId = overrides?.id ?? generateMessageId();
+  const effectiveModel = overrides?.model ?? model;
   const events: ClaudeSSEEvent[] = [];
 
   // message_start
@@ -211,12 +234,12 @@ function buildClaudeTextStreamEvents(
     message: {
       id: msgId,
       type: "message",
-      role: "assistant",
+      role: overrides?.role ?? "assistant",
       content: [],
-      model,
+      model: effectiveModel,
       stop_reason: null,
       stop_sequence: null,
-      usage: { input_tokens: 0, output_tokens: 0 },
+      usage: claudeUsage(overrides),
     },
   });
 
@@ -273,8 +296,11 @@ function buildClaudeTextStreamEvents(
   // message_delta
   events.push({
     type: "message_delta",
-    delta: { stop_reason: "end_turn", stop_sequence: null },
-    usage: { output_tokens: 0 },
+    delta: {
+      stop_reason: claudeStopReason(overrides?.finishReason, "end_turn"),
+      stop_sequence: null,
+    },
+    usage: { output_tokens: claudeUsage(overrides).output_tokens },
   });
 
   // message_stop
@@ -288,8 +314,10 @@ function buildClaudeToolCallStreamEvents(
   model: string,
   chunkSize: number,
   logger: Logger,
+  overrides?: ResponseOverrides,
 ): ClaudeSSEEvent[] {
-  const msgId = generateMessageId();
+  const msgId = overrides?.id ?? generateMessageId();
+  const effectiveModel = overrides?.model ?? model;
   const events: ClaudeSSEEvent[] = [];
 
   // message_start
@@ -298,12 +326,12 @@ function buildClaudeToolCallStreamEvents(
     message: {
       id: msgId,
       type: "message",
-      role: "assistant",
+      role: overrides?.role ?? "assistant",
       content: [],
-      model,
+      model: effectiveModel,
       stop_reason: null,
       stop_sequence: null,
-      usage: { input_tokens: 0, output_tokens: 0 },
+      usage: claudeUsage(overrides),
     },
   });
 
@@ -355,8 +383,11 @@ function buildClaudeToolCallStreamEvents(
   // message_delta
   events.push({
     type: "message_delta",
-    delta: { stop_reason: "tool_use", stop_sequence: null },
-    usage: { output_tokens: 0 },
+    delta: {
+      stop_reason: claudeStopReason(overrides?.finishReason, "tool_use"),
+      stop_sequence: null,
+    },
+    usage: { output_tokens: claudeUsage(overrides).output_tokens },
   });
 
   // message_stop
@@ -367,7 +398,12 @@ function buildClaudeToolCallStreamEvents(
 
 // Non-streaming response builders
 
-function buildClaudeTextResponse(content: string, model: string, reasoning?: string): object {
+function buildClaudeTextResponse(
+  content: string,
+  model: string,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
+): object {
   const contentBlocks: object[] = [];
 
   if (reasoning) {
@@ -377,22 +413,27 @@ function buildClaudeTextResponse(content: string, model: string, reasoning?: str
   contentBlocks.push({ type: "text", text: content });
 
   return {
-    id: generateMessageId(),
+    id: overrides?.id ?? generateMessageId(),
     type: "message",
-    role: "assistant",
+    role: overrides?.role ?? "assistant",
     content: contentBlocks,
-    model,
-    stop_reason: "end_turn",
+    model: overrides?.model ?? model,
+    stop_reason: claudeStopReason(overrides?.finishReason, "end_turn"),
     stop_sequence: null,
-    usage: { input_tokens: 0, output_tokens: 0 },
+    usage: claudeUsage(overrides),
   };
 }
 
-function buildClaudeToolCallResponse(toolCalls: ToolCall[], model: string, logger: Logger): object {
+function buildClaudeToolCallResponse(
+  toolCalls: ToolCall[],
+  model: string,
+  logger: Logger,
+  overrides?: ResponseOverrides,
+): object {
   return {
-    id: generateMessageId(),
+    id: overrides?.id ?? generateMessageId(),
     type: "message",
-    role: "assistant",
+    role: overrides?.role ?? "assistant",
     content: toolCalls.map((tc) => {
       let argsObj: unknown;
       try {
@@ -410,10 +451,10 @@ function buildClaudeToolCallResponse(toolCalls: ToolCall[], model: string, logge
         input: argsObj,
       };
     }),
-    model,
-    stop_reason: "tool_use",
+    model: overrides?.model ?? model,
+    stop_reason: claudeStopReason(overrides?.finishReason, "tool_use"),
     stop_sequence: null,
-    usage: { input_tokens: 0, output_tokens: 0 },
+    usage: claudeUsage(overrides),
   };
 }
 
@@ -424,8 +465,10 @@ function buildClaudeContentWithToolCallsStreamEvents(
   chunkSize: number,
   logger: Logger,
   reasoning?: string,
+  overrides?: ResponseOverrides,
 ): ClaudeSSEEvent[] {
-  const msgId = generateMessageId();
+  const msgId = overrides?.id ?? generateMessageId();
+  const effectiveModel = overrides?.model ?? model;
   const events: ClaudeSSEEvent[] = [];
 
   // message_start
@@ -434,12 +477,12 @@ function buildClaudeContentWithToolCallsStreamEvents(
     message: {
       id: msgId,
       type: "message",
-      role: "assistant",
+      role: overrides?.role ?? "assistant",
       content: [],
-      model,
+      model: effectiveModel,
       stop_reason: null,
       stop_sequence: null,
-      usage: { input_tokens: 0, output_tokens: 0 },
+      usage: claudeUsage(overrides),
     },
   });
 
@@ -539,8 +582,11 @@ function buildClaudeContentWithToolCallsStreamEvents(
   // message_delta
   events.push({
     type: "message_delta",
-    delta: { stop_reason: "tool_use", stop_sequence: null },
-    usage: { output_tokens: 0 },
+    delta: {
+      stop_reason: claudeStopReason(overrides?.finishReason, "tool_use"),
+      stop_sequence: null,
+    },
+    usage: { output_tokens: claudeUsage(overrides).output_tokens },
   });
 
   // message_stop
@@ -555,6 +601,7 @@ function buildClaudeContentWithToolCallsResponse(
   model: string,
   logger: Logger,
   reasoning?: string,
+  overrides?: ResponseOverrides,
 ): object {
   const contentBlocks: object[] = [];
 
@@ -583,14 +630,14 @@ function buildClaudeContentWithToolCallsResponse(
   }
 
   return {
-    id: generateMessageId(),
+    id: overrides?.id ?? generateMessageId(),
     type: "message",
-    role: "assistant",
+    role: overrides?.role ?? "assistant",
     content: contentBlocks,
-    model,
-    stop_reason: "tool_use",
+    model: overrides?.model ?? model,
+    stop_reason: claudeStopReason(overrides?.finishReason, "tool_use"),
     stop_sequence: null,
-    usage: { input_tokens: 0, output_tokens: 0 },
+    usage: claudeUsage(overrides),
   };
 }
 
@@ -791,6 +838,12 @@ export async function handleMessages(
 
   // Content + tool calls response (must be checked before text/tool-only branches)
   if (isContentWithToolCallsResponse(response)) {
+    if (response.webSearches?.length) {
+      logger.warn(
+        "webSearches in fixture response are not supported for Claude Messages API — ignoring",
+      );
+    }
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? "/v1/messages",
@@ -805,6 +858,7 @@ export async function handleMessages(
         completionReq.model,
         logger,
         response.reasoning,
+        overrides,
       );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
@@ -816,6 +870,7 @@ export async function handleMessages(
         chunkSize,
         logger,
         response.reasoning,
+        overrides,
       );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeClaudeSSEStream(res, events, {
@@ -841,6 +896,7 @@ export async function handleMessages(
         "webSearches in fixture response are not supported for Claude Messages API — ignoring",
       );
     }
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? "/v1/messages",
@@ -853,6 +909,7 @@ export async function handleMessages(
         response.content,
         completionReq.model,
         response.reasoning,
+        overrides,
       );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
@@ -862,6 +919,7 @@ export async function handleMessages(
         completionReq.model,
         chunkSize,
         response.reasoning,
+        overrides,
       );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeClaudeSSEStream(res, events, {
@@ -882,6 +940,7 @@ export async function handleMessages(
 
   // Tool call response
   if (isToolCallResponse(response)) {
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? "/v1/messages",
@@ -890,7 +949,12 @@ export async function handleMessages(
       response: { status: 200, fixture },
     });
     if (claudeReq.stream !== true) {
-      const body = buildClaudeToolCallResponse(response.toolCalls, completionReq.model, logger);
+      const body = buildClaudeToolCallResponse(
+        response.toolCalls,
+        completionReq.model,
+        logger,
+        overrides,
+      );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     } else {
@@ -899,6 +963,7 @@ export async function handleMessages(
         completionReq.model,
         chunkSize,
         logger,
+        overrides,
       );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeClaudeSSEStream(res, events, {

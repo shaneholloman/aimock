@@ -4,6 +4,7 @@ import type {
   EmbeddingFixtureOpts,
   Fixture,
   FixtureFileEntry,
+  FixtureFileResponse,
   FixtureMatch,
   FixtureOpts,
   FixtureResponse,
@@ -19,6 +20,7 @@ import {
   loadFixtureFile,
   loadFixturesFromDir,
   entryToFixture,
+  normalizeResponse,
   validateFixtures,
 } from "./fixture-loader.js";
 import { Journal } from "./journal.js";
@@ -95,21 +97,21 @@ export class LLMock {
 
   // ---- Convenience ----
 
-  on(match: FixtureMatch, response: FixtureResponse, opts?: FixtureOpts): this {
+  on(match: FixtureMatch, response: FixtureFileResponse, opts?: FixtureOpts): this {
     return this.addFixture({
       match,
-      response,
+      response: normalizeResponse(response),
       ...opts,
     });
   }
 
-  onMessage(pattern: string | RegExp, response: FixtureResponse, opts?: FixtureOpts): this {
+  onMessage(pattern: string | RegExp, response: FixtureFileResponse, opts?: FixtureOpts): this {
     return this.on({ userMessage: pattern }, response, opts);
   }
 
   onEmbedding(
     pattern: string | RegExp,
-    response: FixtureResponse,
+    response: FixtureFileResponse,
     opts?: EmbeddingFixtureOpts,
   ): this {
     return this.on({ inputText: pattern }, response, opts);
@@ -120,11 +122,11 @@ export class LLMock {
     return this.on({ userMessage: pattern, responseFormat: "json_object" }, { content }, opts);
   }
 
-  onToolCall(name: string, response: FixtureResponse, opts?: FixtureOpts): this {
+  onToolCall(name: string, response: FixtureFileResponse, opts?: FixtureOpts): this {
     return this.on({ toolName: name }, response, opts);
   }
 
-  onToolResult(id: string, response: FixtureResponse, opts?: FixtureOpts): this {
+  onToolResult(id: string, response: FixtureFileResponse, opts?: FixtureOpts): this {
     return this.on({ toolCallId: id }, response, opts);
   }
 

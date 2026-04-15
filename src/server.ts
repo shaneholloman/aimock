@@ -20,6 +20,7 @@ import {
   buildToolCallCompletion,
   buildContentWithToolCallsChunks,
   buildContentWithToolCallsCompletion,
+  extractOverrides,
   isTextResponse,
   isToolCallResponse,
   isContentWithToolCallsResponse,
@@ -510,6 +511,12 @@ async function handleCompletions(
 
   // Content + tool calls response
   if (isContentWithToolCallsResponse(response)) {
+    if (response.webSearches?.length) {
+      defaults.logger.warn(
+        "webSearches in fixture response are not supported for Chat Completions API — ignoring",
+      );
+    }
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? COMPLETIONS_PATH,
@@ -522,6 +529,8 @@ async function handleCompletions(
         response.content,
         response.toolCalls,
         body.model,
+        response.reasoning,
+        overrides,
       );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(completion));
@@ -531,6 +540,8 @@ async function handleCompletions(
         response.toolCalls,
         body.model,
         chunkSize,
+        response.reasoning,
+        overrides,
       );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeSSEStream(res, chunks, {
@@ -551,6 +562,12 @@ async function handleCompletions(
 
   // Text response
   if (isTextResponse(response)) {
+    if (response.webSearches?.length) {
+      defaults.logger.warn(
+        "webSearches in fixture response are not supported for Chat Completions API — ignoring",
+      );
+    }
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? COMPLETIONS_PATH,
@@ -559,11 +576,22 @@ async function handleCompletions(
       response: { status: 200, fixture },
     });
     if (body.stream !== true) {
-      const completion = buildTextCompletion(response.content, body.model, response.reasoning);
+      const completion = buildTextCompletion(
+        response.content,
+        body.model,
+        response.reasoning,
+        overrides,
+      );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(completion));
     } else {
-      const chunks = buildTextChunks(response.content, body.model, chunkSize, response.reasoning);
+      const chunks = buildTextChunks(
+        response.content,
+        body.model,
+        chunkSize,
+        response.reasoning,
+        overrides,
+      );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeSSEStream(res, chunks, {
         latency,
@@ -583,6 +611,7 @@ async function handleCompletions(
 
   // Tool call response
   if (isToolCallResponse(response)) {
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? COMPLETIONS_PATH,
@@ -591,11 +620,11 @@ async function handleCompletions(
       response: { status: 200, fixture },
     });
     if (body.stream !== true) {
-      const completion = buildToolCallCompletion(response.toolCalls, body.model);
+      const completion = buildToolCallCompletion(response.toolCalls, body.model, overrides);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(completion));
     } else {
-      const chunks = buildToolCallChunks(response.toolCalls, body.model, chunkSize);
+      const chunks = buildToolCallChunks(response.toolCalls, body.model, chunkSize, overrides);
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeSSEStream(res, chunks, {
         latency,
