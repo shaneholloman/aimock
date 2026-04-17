@@ -32,8 +32,10 @@ function matchCriteriaEqual(a: FixtureMatch, b: FixtureMatch): boolean {
 export interface JournalOptions {
   /**
    * Maximum number of entries to retain. When exceeded, oldest entries are
-   * dropped FIFO. Set to 0 (or a negative value) for unbounded retention
-   * (the historical default — suitable for short-lived test runs only).
+   * dropped FIFO. Set to 0 (or omit) for unbounded retention (the historical
+   * default — suitable for short-lived test runs only). Negative values are
+   * rejected at the CLI parse layer; programmatically they are treated as 0
+   * (unbounded) for back-compat.
    *
    * Long-running servers (e.g. mock proxies in CI/demo environments) should
    * always set a finite cap: every request appends an entry holding the
@@ -44,9 +46,11 @@ export interface JournalOptions {
   /**
    * Maximum number of unique testIds retained in the fixture match-count
    * map (`fixtureMatchCountsByTestId`). When exceeded, the oldest testId
-   * (by first-insertion order) is evicted FIFO. Set to 0 (or a negative
-   * value) for unbounded retention. Without a cap this map can grow over
-   * time in long-running servers that see many unique testIds.
+   * (by first-insertion order) is evicted FIFO. Set to 0 (or omit) for
+   * unbounded retention. Negative values are rejected at the CLI parse
+   * layer; programmatically they are treated as 0 (unbounded) for
+   * back-compat. Without a cap this map can grow over time in long-running
+   * servers that see many unique testIds.
    */
   fixtureCountsMaxTestIds?: number;
 }
@@ -104,7 +108,24 @@ export class Journal {
     return this.entries.filter((e) => e.response.fixture === fixture);
   }
 
+  /**
+   * READ-ONLY accessor. Returns the existing count map for `testId`, or an
+   * empty transient Map if none exists. Does NOT insert into the cache and
+   * does NOT trigger FIFO eviction — callers may read freely without
+   * perturbing cache state. For the write path, see
+   * `getOrCreateFixtureMatchCountsForTest`.
+   */
   getFixtureMatchCountsForTest(testId: string): Map<Fixture, number> {
+    return this.fixtureMatchCountsByTestId.get(testId) ?? new Map();
+  }
+
+  /**
+   * WRITE path: get the count map for `testId`, inserting a fresh empty Map
+   * if missing and running FIFO eviction when the testId cap is exceeded.
+   * Only callers that intend to mutate the map (e.g. incrementing a count)
+   * should use this.
+   */
+  private getOrCreateFixtureMatchCountsForTest(testId: string): Map<Fixture, number> {
     let counts = this.fixtureMatchCountsByTestId.get(testId);
     if (!counts) {
       counts = new Map();
@@ -134,7 +155,7 @@ export class Journal {
     allFixtures?: readonly Fixture[],
     testId = DEFAULT_TEST_ID,
   ): void {
-    const counts = this.getFixtureMatchCountsForTest(testId);
+    const counts = this.getOrCreateFixtureMatchCountsForTest(testId);
     counts.set(fixture, (counts.get(fixture) ?? 0) + 1);
     // When a sequenced fixture matches, also increment all siblings with matching criteria
     if (fixture.match.sequenceIndex !== undefined && allFixtures) {
