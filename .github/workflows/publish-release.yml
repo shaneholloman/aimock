@@ -78,7 +78,7 @@ jobs:
         if: steps.check.outputs.published == 'false'
         run: |
           TAG="v${{ steps.check.outputs.version }}"
-          gh release create "${TAG}" --generate-notes --title "${TAG}" --verify-tag
+          gh release create "${TAG}" --generate-notes --title "${TAG}" --verify-tag --latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
