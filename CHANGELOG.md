@@ -1,5 +1,11 @@
 # @copilotkit/aimock
 
+## 1.14.5
+
+### Fixed
+
+- Recorder no longer buffers SSE (`text/event-stream`) upstream responses before relaying to the client. `proxyAndRecord` accumulated all upstream chunks and replayed them via a single `res.end()`, collapsing multi-frame streams into one client-visible write and breaking progressive rendering for downstream consumers (notably showcase `--proxy-only` deployments). SSE responses now stream chunk-by-chunk to the client while still being tee'd into the recording buffer; non-SSE behavior is unchanged.
+
 ## 1.14.3
 
 ### Added
