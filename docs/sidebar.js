@@ -42,6 +42,7 @@
         { label: "Embeddings", href: "/embeddings" },
         { label: "Structured Output", href: "/structured-output" },
         { label: "Sequential Responses", href: "/sequential-responses" },
+        { label: "Multi-Turn Conversations", href: "/multi-turn" },
         { label: "Fixtures", href: "/fixtures" },
         { label: "Error Injection", href: "/error-injection" },
         { label: "Chaos Testing", href: "/chaos-testing" },
@@ -135,9 +136,8 @@
     if (!content) return;
 
     var headings = content.querySelectorAll("h2, h3");
-    if (headings.length < 4) return;
 
-    // Ensure each heading has an id for anchor links
+    // Always assign ids so cross-page anchors resolve, even on short pages.
     for (var i = 0; i < headings.length; i++) {
       var h = headings[i];
       if (!h.id) {
@@ -149,6 +149,9 @@
           .replace(/^-|-$/g, "");
       }
     }
+
+    // TOC rendering requires at least 4 headings to be worth the space.
+    if (headings.length < 4) return;
 
     // Build TOC HTML
     var html = '<div class="page-toc-label">On this page</div>';
