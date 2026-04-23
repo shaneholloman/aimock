@@ -24,6 +24,7 @@ import type {
 import {
   isTextResponse,
   isToolCallResponse,
+  isContentWithToolCallsResponse,
   isErrorResponse,
   flattenHeaders,
   getTestId,
@@ -108,7 +109,7 @@ export function ollamaToCompletionRequest(req: OllamaRequest): ChatCompletionReq
   return {
     model: req.model,
     messages,
-    stream: req.stream,
+    stream: req.stream ?? true,
     temperature: req.options?.temperature,
     max_tokens: req.options?.num_predict,
     tools,
@@ -119,7 +120,7 @@ function ollamaGenerateToCompletionRequest(req: OllamaGenerateRequest): ChatComp
   return {
     model: req.model,
     messages: [{ role: "user", content: req.prompt }],
-    stream: req.stream,
+    stream: req.stream ?? true,
     temperature: req.options?.temperature,
     max_tokens: req.options?.num_predict,
   };
@@ -254,6 +255,103 @@ function buildOllamaChatToolCallResponse(
     message: {
       role: "assistant",
       content: "",
+      tool_calls: ollamaToolCalls,
+    },
+    done: true,
+    ...DURATION_FIELDS,
+  };
+}
+
+// ─── Response builders: /api/chat — content + tool calls ────────────────────
+
+function buildOllamaChatContentWithToolCallsChunks(
+  content: string,
+  toolCalls: ToolCall[],
+  model: string,
+  chunkSize: number,
+  logger: Logger,
+): object[] {
+  const chunks: object[] = [];
+
+  // Content chunks first
+  for (let i = 0; i < content.length; i += chunkSize) {
+    const slice = content.slice(i, i + chunkSize);
+    chunks.push({
+      model,
+      message: { role: "assistant", content: slice },
+      done: false,
+    });
+  }
+
+  // Tool calls in a single chunk (same as tool-call-only path)
+  const ollamaToolCalls = toolCalls.map((tc) => {
+    let argsObj: unknown;
+    try {
+      argsObj = JSON.parse(tc.arguments || "{}");
+    } catch {
+      logger.warn(
+        `Malformed JSON in fixture tool call arguments for "${tc.name}": ${tc.arguments}`,
+      );
+      argsObj = {};
+    }
+    return {
+      function: {
+        name: tc.name,
+        arguments: argsObj,
+      },
+    };
+  });
+
+  chunks.push({
+    model,
+    message: {
+      role: "assistant",
+      content: "",
+      tool_calls: ollamaToolCalls,
+    },
+    done: false,
+  });
+
+  // Final chunk
+  chunks.push({
+    model,
+    message: { role: "assistant", content: "" },
+    done: true,
+    ...DURATION_FIELDS,
+  });
+
+  return chunks;
+}
+
+function buildOllamaChatContentWithToolCallsResponse(
+  content: string,
+  toolCalls: ToolCall[],
+  model: string,
+  logger: Logger,
+): object {
+  const ollamaToolCalls = toolCalls.map((tc) => {
+    let argsObj: unknown;
+    try {
+      argsObj = JSON.parse(tc.arguments || "{}");
+    } catch {
+      logger.warn(
+        `Malformed JSON in fixture tool call arguments for "${tc.name}": ${tc.arguments}`,
+      );
+      argsObj = {};
+    }
+    return {
+      function: {
+        name: tc.name,
+        arguments: argsObj,
+      },
+    };
+  });
+
+  return {
+    model,
+    message: {
+      role: "assistant",
+      content,
       tool_calls: ollamaToolCalls,
     },
     done: true,
@@ -415,7 +513,6 @@ export async function handleOllama(
         headers: flattenHeaders(req.headers),
         body: completionReq,
       },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -424,7 +521,7 @@ export async function handleOllama(
 
   if (!fixture) {
     if (defaults.record) {
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         completionReq,
@@ -434,13 +531,13 @@ export async function handleOllama(
         defaults,
         raw,
       );
-      if (outcome !== "not_configured") {
+      if (proxied) {
         journal.add({
           method: req.method ?? "POST",
           path: urlPath,
           headers: flattenHeaders(req.headers),
           body: completionReq,
-          response: { status: res.statusCode ?? 200, fixture: null },
+          response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
         return;
       }
@@ -490,6 +587,49 @@ export async function handleOllama(
       response: { status, fixture },
     });
     writeErrorResponse(res, status, JSON.stringify(response));
+    return;
+  }
+
+  // Content + tool calls response (must be checked before text/tool-only branches)
+  if (isContentWithToolCallsResponse(response)) {
+    const journalEntry = journal.add({
+      method: req.method ?? "POST",
+      path: urlPath,
+      headers: flattenHeaders(req.headers),
+      body: completionReq,
+      response: { status: 200, fixture },
+    });
+    if (!streaming) {
+      const body = buildOllamaChatContentWithToolCallsResponse(
+        response.content,
+        response.toolCalls,
+        completionReq.model,
+        logger,
+      );
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    } else {
+      const chunks = buildOllamaChatContentWithToolCallsChunks(
+        response.content,
+        response.toolCalls,
+        completionReq.model,
+        chunkSize,
+        logger,
+      );
+      const interruption = createInterruptionSignal(fixture);
+      const completed = await writeNDJSONStream(res, chunks, {
+        latency,
+        streamingProfile: fixture.streamingProfile,
+        signal: interruption?.signal,
+        onChunkSent: interruption?.tick,
+      });
+      if (!completed) {
+        if (!res.writableEnded) res.destroy();
+        journalEntry.response.interrupted = true;
+        journalEntry.response.interruptReason = interruption?.reason();
+      }
+      interruption?.cleanup();
+    }
     return;
   }
 
@@ -675,7 +815,6 @@ export async function handleOllamaGenerate(
         headers: flattenHeaders(req.headers),
         body: completionReq,
       },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -684,7 +823,7 @@ export async function handleOllamaGenerate(
 
   if (!fixture) {
     if (defaults.record) {
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         completionReq,
@@ -694,13 +833,13 @@ export async function handleOllamaGenerate(
         defaults,
         raw,
       );
-      if (outcome !== "not_configured") {
+      if (proxied) {
         journal.add({
           method: req.method ?? "POST",
           path: urlPath,
           headers: flattenHeaders(req.headers),
           body: completionReq,
-          response: { status: res.statusCode ?? 200, fixture: null },
+          response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
         return;
       }
@@ -794,7 +933,29 @@ export async function handleOllamaGenerate(
     return;
   }
 
-  // Tool call responses not supported for /api/generate — fall through to error
+  // Tool call fixtures matched but not supported on /api/generate
+  if (isToolCallResponse(response) || isContentWithToolCallsResponse(response)) {
+    journal.add({
+      method: req.method ?? "POST",
+      path: urlPath,
+      headers: flattenHeaders(req.headers),
+      body: completionReq,
+      response: { status: 400, fixture },
+    });
+    writeErrorResponse(
+      res,
+      400,
+      JSON.stringify({
+        error: {
+          message: "Tool call fixtures are not supported on /api/generate — use /api/chat instead",
+          type: "invalid_request_error",
+        },
+      }),
+    );
+    return;
+  }
+
+  // Unknown response type
   journal.add({
     method: req.method ?? "POST",
     path: urlPath,

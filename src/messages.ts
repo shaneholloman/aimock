@@ -752,7 +752,6 @@ export async function handleMessages(
         headers: flattenHeaders(req.headers),
         body: completionReq,
       },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -761,7 +760,7 @@ export async function handleMessages(
 
   if (!fixture) {
     if (defaults.record) {
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         completionReq,
@@ -771,13 +770,13 @@ export async function handleMessages(
         defaults,
         raw,
       );
-      if (outcome !== "not_configured") {
+      if (proxied) {
         journal.add({
           method: req.method ?? "POST",
           path: req.url ?? "/v1/messages",
           headers: flattenHeaders(req.headers),
           body: completionReq,
-          response: { status: res.statusCode ?? 200, fixture: null },
+          response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
         return;
       }
@@ -893,7 +892,7 @@ export async function handleMessages(
   // Text response
   if (isTextResponse(response)) {
     if (response.webSearches?.length) {
-      defaults.logger.warn(
+      logger.warn(
         "webSearches in fixture response are not supported for Claude Messages API — ignoring",
       );
     }

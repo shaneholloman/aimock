@@ -59,6 +59,24 @@ export async function handleSpeech(
     return;
   }
 
+  if (!speechReq.input) {
+    journal.add({
+      method,
+      path,
+      headers: flattenHeaders(req.headers),
+      body: null,
+      response: { status: 400, fixture: null },
+    });
+    writeErrorResponse(
+      res,
+      400,
+      JSON.stringify({
+        error: { message: "Missing required parameter: 'input'", type: "invalid_request_error" },
+      }),
+    );
+    return;
+  }
+
   const syntheticReq: ChatCompletionRequest = {
     model: speechReq.model ?? "tts-1",
     messages: [{ role: "user", content: speechReq.input }],
@@ -85,7 +103,6 @@ export async function handleSpeech(
       req.headers,
       journal,
       { method, path, headers: flattenHeaders(req.headers), body: syntheticReq },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -94,7 +111,7 @@ export async function handleSpeech(
 
   if (!fixture) {
     if (defaults.record) {
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         syntheticReq,
@@ -104,13 +121,13 @@ export async function handleSpeech(
         defaults,
         raw,
       );
-      if (outcome !== "not_configured") {
+      if (proxied) {
         journal.add({
           method,
           path,
           headers: flattenHeaders(req.headers),
           body: syntheticReq,
-          response: { status: res.statusCode ?? 200, fixture: null },
+          response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
         return;
       }

@@ -1,5 +1,5 @@
 /**
- * OpenAI Embeddings API support for LLMock.
+ * OpenAI Embeddings API support for aimock.
  *
  * Handles POST /v1/embeddings requests. Matches fixtures using the `inputText`
  * field, and falls back to generating a deterministic embedding from the input
@@ -7,7 +7,12 @@
  */
 
 import type * as http from "node:http";
-import type { ChatCompletionRequest, Fixture, HandlerDefaults } from "./types.js";
+import type {
+  ChatCompletionRequest,
+  Fixture,
+  HandlerDefaults,
+  RecordProviderKey,
+} from "./types.js";
 import {
   isEmbeddingResponse,
   isErrorResponse,
@@ -42,6 +47,7 @@ export async function handleEmbeddings(
   journal: Journal,
   defaults: HandlerDefaults,
   setCorsHeaders: (res: http.ServerResponse) => void,
+  providerKey: RecordProviderKey = "openai",
 ): Promise<void> {
   const { logger } = defaults;
   setCorsHeaders(res);
@@ -65,6 +71,28 @@ export async function handleEmbeddings(
           message: "Malformed JSON",
           type: "invalid_request_error",
           code: "invalid_json",
+        },
+      }),
+    );
+    return;
+  }
+
+  // Validate required input parameter
+  if (embeddingReq.input === undefined || embeddingReq.input === null) {
+    journal.add({
+      method: req.method ?? "POST",
+      path: req.url ?? "/v1/embeddings",
+      headers: flattenHeaders(req.headers),
+      body: null,
+      response: { status: 400, fixture: null },
+    });
+    writeErrorResponse(
+      res,
+      400,
+      JSON.stringify({
+        error: {
+          message: "Missing required parameter: 'input'",
+          type: "invalid_request_error",
         },
       }),
     );
@@ -113,7 +141,6 @@ export async function handleEmbeddings(
         headers: flattenHeaders(req.headers),
         body: syntheticReq,
       },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -177,23 +204,23 @@ export async function handleEmbeddings(
 
   // No fixture match — try record-and-replay proxy if configured
   if (defaults.record) {
-    const outcome = await proxyAndRecord(
+    const proxied = await proxyAndRecord(
       req,
       res,
       syntheticReq,
-      "openai",
+      providerKey,
       req.url ?? "/v1/embeddings",
       fixtures,
       defaults,
       raw,
     );
-    if (outcome !== "not_configured") {
+    if (proxied) {
       journal.add({
         method: req.method ?? "POST",
         path: req.url ?? "/v1/embeddings",
         headers: flattenHeaders(req.headers),
         body: syntheticReq,
-        response: { status: res.statusCode ?? 200, fixture: null },
+        response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
       });
       return;
     }

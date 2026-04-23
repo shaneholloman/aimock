@@ -13,13 +13,16 @@ import type {
   ChatMessage,
   Fixture,
   HandlerDefaults,
+  ResponseOverrides,
   ToolCall,
   ToolDefinition,
 } from "./types.js";
 import {
   generateToolUseId,
+  extractOverrides,
   isTextResponse,
   isToolCallResponse,
+  isContentWithToolCallsResponse,
   isErrorResponse,
   flattenHeaders,
   getTestId,
@@ -32,7 +35,11 @@ import type { Journal } from "./journal.js";
 import type { Logger } from "./logger.js";
 import { applyChaos } from "./chaos.js";
 import { proxyAndRecord } from "./recorder.js";
-import { buildBedrockStreamTextEvents, buildBedrockStreamToolCallEvents } from "./bedrock.js";
+import {
+  buildBedrockStreamTextEvents,
+  buildBedrockStreamToolCallEvents,
+  buildBedrockStreamContentWithToolCallsEvents,
+} from "./bedrock.js";
 
 // ─── Converse request types ─────────────────────────────────────────────────
 
@@ -58,6 +65,30 @@ interface ConverseRequest {
   system?: { text: string }[];
   inferenceConfig?: { maxTokens?: number; temperature?: number };
   toolConfig?: { tools: { toolSpec: ConverseToolSpec }[] };
+}
+
+// ─── Converse stop_reason mapping ──────────────────────────────────────────
+
+function converseStopReason(
+  overrideFinishReason: string | undefined,
+  defaultReason: string,
+): string {
+  if (!overrideFinishReason) return defaultReason;
+  if (overrideFinishReason === "stop") return "end_turn";
+  if (overrideFinishReason === "tool_calls") return "tool_use";
+  if (overrideFinishReason === "length") return "max_tokens";
+  return overrideFinishReason;
+}
+
+function converseUsage(overrides?: ResponseOverrides): {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+} {
+  if (!overrides?.usage) return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  const inputTokens = overrides.usage.input_tokens ?? overrides.usage.prompt_tokens ?? 0;
+  const outputTokens = overrides.usage.output_tokens ?? overrides.usage.completion_tokens ?? 0;
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
 }
 
 // ─── Input conversion: Converse → ChatCompletionRequest ─────────────────────
@@ -157,7 +188,11 @@ export function converseToCompletionRequest(
 
 // ─── Response builders ──────────────────────────────────────────────────────
 
-function buildConverseTextResponse(content: string, reasoning?: string): object {
+function buildConverseTextResponse(
+  content: string,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
+): object {
   const contentBlocks: object[] = [];
   if (reasoning) {
     contentBlocks.push({
@@ -173,12 +208,16 @@ function buildConverseTextResponse(content: string, reasoning?: string): object 
         content: contentBlocks,
       },
     },
-    stopReason: "end_turn",
-    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    stopReason: converseStopReason(overrides?.finishReason, "end_turn"),
+    usage: converseUsage(overrides),
   };
 }
 
-function buildConverseToolCallResponse(toolCalls: ToolCall[], logger: Logger): object {
+function buildConverseToolCallResponse(
+  toolCalls: ToolCall[],
+  logger: Logger,
+  overrides?: ResponseOverrides,
+): object {
   return {
     output: {
       message: {
@@ -203,8 +242,53 @@ function buildConverseToolCallResponse(toolCalls: ToolCall[], logger: Logger): o
         }),
       },
     },
-    stopReason: "tool_use",
-    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    stopReason: converseStopReason(overrides?.finishReason, "tool_use"),
+    usage: converseUsage(overrides),
+  };
+}
+
+function buildConverseContentWithToolCallsResponse(
+  content: string,
+  toolCalls: ToolCall[],
+  logger: Logger,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
+): object {
+  const contentBlocks: object[] = [];
+  if (reasoning) {
+    contentBlocks.push({
+      reasoningContent: { reasoningText: { text: reasoning } },
+    });
+  }
+  contentBlocks.push({ text: content });
+  for (const tc of toolCalls) {
+    let argsObj: unknown;
+    try {
+      argsObj = JSON.parse(tc.arguments || "{}");
+    } catch {
+      logger.warn(
+        `Malformed JSON in fixture tool call arguments for "${tc.name}": ${tc.arguments}`,
+      );
+      argsObj = {};
+    }
+    contentBlocks.push({
+      toolUse: {
+        toolUseId: tc.id || generateToolUseId(),
+        name: tc.name,
+        input: argsObj,
+      },
+    });
+  }
+
+  return {
+    output: {
+      message: {
+        role: "assistant",
+        content: contentBlocks,
+      },
+    },
+    stopReason: converseStopReason(overrides?.finishReason, "tool_use"),
+    usage: converseUsage(overrides),
   };
 }
 
@@ -298,7 +382,6 @@ export async function handleConverse(
         headers: flattenHeaders(req.headers),
         body: completionReq,
       },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -307,7 +390,7 @@ export async function handleConverse(
 
   if (!fixture) {
     if (defaults.record) {
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         completionReq,
@@ -317,13 +400,13 @@ export async function handleConverse(
         defaults,
         raw,
       );
-      if (outcome !== "not_configured") {
+      if (proxied) {
         journal.add({
           method: req.method ?? "POST",
           path: urlPath,
           headers: flattenHeaders(req.headers),
           body: completionReq,
-          response: { status: res.statusCode ?? 200, fixture: null },
+          response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
         return;
       }
@@ -367,12 +450,25 @@ export async function handleConverse(
       body: completionReq,
       response: { status, fixture },
     });
-    writeErrorResponse(res, status, JSON.stringify(response));
+    const errBody = {
+      type: "error",
+      error: {
+        type: response.error.type || "invalid_request_error",
+        message: response.error.message,
+      },
+    };
+    writeErrorResponse(res, status, JSON.stringify(errBody));
     return;
   }
 
-  // Text response
-  if (isTextResponse(response)) {
+  // Content + tool calls response
+  if (isContentWithToolCallsResponse(response)) {
+    if (response.webSearches?.length) {
+      logger.warn(
+        "webSearches in fixture response are not supported for Bedrock Converse API — ignoring",
+      );
+    }
+    const overrides = extractOverrides(response);
     journal.add({
       method: req.method ?? "POST",
       path: urlPath,
@@ -380,7 +476,34 @@ export async function handleConverse(
       body: completionReq,
       response: { status: 200, fixture },
     });
-    const body = buildConverseTextResponse(response.content, response.reasoning);
+    const body = buildConverseContentWithToolCallsResponse(
+      response.content,
+      response.toolCalls,
+      logger,
+      response.reasoning,
+      overrides,
+    );
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+    return;
+  }
+
+  // Text response
+  if (isTextResponse(response)) {
+    if (response.webSearches?.length) {
+      logger.warn(
+        "webSearches in fixture response are not supported for Bedrock Converse API — ignoring",
+      );
+    }
+    const overrides = extractOverrides(response);
+    journal.add({
+      method: req.method ?? "POST",
+      path: urlPath,
+      headers: flattenHeaders(req.headers),
+      body: completionReq,
+      response: { status: 200, fixture },
+    });
+    const body = buildConverseTextResponse(response.content, response.reasoning, overrides);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
     return;
@@ -388,6 +511,7 @@ export async function handleConverse(
 
   // Tool call response
   if (isToolCallResponse(response)) {
+    const overrides = extractOverrides(response);
     journal.add({
       method: req.method ?? "POST",
       path: urlPath,
@@ -395,7 +519,7 @@ export async function handleConverse(
       body: completionReq,
       response: { status: 200, fixture },
     });
-    const body = buildConverseToolCallResponse(response.toolCalls, logger);
+    const body = buildConverseToolCallResponse(response.toolCalls, logger, overrides);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
     return;
@@ -509,7 +633,6 @@ export async function handleConverseStream(
         headers: flattenHeaders(req.headers),
         body: completionReq,
       },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -518,7 +641,7 @@ export async function handleConverseStream(
 
   if (!fixture) {
     if (defaults.record) {
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         completionReq,
@@ -528,13 +651,13 @@ export async function handleConverseStream(
         defaults,
         raw,
       );
-      if (outcome !== "not_configured") {
+      if (proxied) {
         journal.add({
           method: req.method ?? "POST",
           path: urlPath,
           headers: flattenHeaders(req.headers),
           body: completionReq,
-          response: { status: res.statusCode ?? 200, fixture: null },
+          response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
         return;
       }
@@ -580,12 +703,25 @@ export async function handleConverseStream(
       body: completionReq,
       response: { status, fixture },
     });
-    writeErrorResponse(res, status, JSON.stringify(response));
+    const errBody = {
+      type: "error",
+      error: {
+        type: response.error.type || "invalid_request_error",
+        message: response.error.message,
+      },
+    };
+    writeErrorResponse(res, status, JSON.stringify(errBody));
     return;
   }
 
-  // Text response — stream as Event Stream
-  if (isTextResponse(response)) {
+  // Content + tool calls response — stream as Event Stream
+  if (isContentWithToolCallsResponse(response)) {
+    if (response.webSearches?.length) {
+      logger.warn(
+        "webSearches in fixture response are not supported for Bedrock Converse API — ignoring",
+      );
+    }
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: urlPath,
@@ -593,7 +729,51 @@ export async function handleConverseStream(
       body: completionReq,
       response: { status: 200, fixture },
     });
-    const events = buildBedrockStreamTextEvents(response.content, chunkSize, response.reasoning);
+    const events = buildBedrockStreamContentWithToolCallsEvents(
+      response.content,
+      response.toolCalls,
+      chunkSize,
+      logger,
+      response.reasoning,
+      overrides,
+    );
+    const interruption = createInterruptionSignal(fixture);
+    const completed = await writeEventStream(res, events, {
+      latency,
+      streamingProfile: fixture.streamingProfile,
+      signal: interruption?.signal,
+      onChunkSent: interruption?.tick,
+    });
+    if (!completed) {
+      if (!res.writableEnded) res.destroy();
+      journalEntry.response.interrupted = true;
+      journalEntry.response.interruptReason = interruption?.reason();
+    }
+    interruption?.cleanup();
+    return;
+  }
+
+  // Text response — stream as Event Stream
+  if (isTextResponse(response)) {
+    if (response.webSearches?.length) {
+      logger.warn(
+        "webSearches in fixture response are not supported for Bedrock Converse API — ignoring",
+      );
+    }
+    const overrides = extractOverrides(response);
+    const journalEntry = journal.add({
+      method: req.method ?? "POST",
+      path: urlPath,
+      headers: flattenHeaders(req.headers),
+      body: completionReq,
+      response: { status: 200, fixture },
+    });
+    const events = buildBedrockStreamTextEvents(
+      response.content,
+      chunkSize,
+      response.reasoning,
+      overrides,
+    );
     const interruption = createInterruptionSignal(fixture);
     const completed = await writeEventStream(res, events, {
       latency,
@@ -612,6 +792,7 @@ export async function handleConverseStream(
 
   // Tool call response — stream as Event Stream
   if (isToolCallResponse(response)) {
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: urlPath,
@@ -619,7 +800,12 @@ export async function handleConverseStream(
       body: completionReq,
       response: { status: 200, fixture },
     });
-    const events = buildBedrockStreamToolCallEvents(response.toolCalls, chunkSize, logger);
+    const events = buildBedrockStreamToolCallEvents(
+      response.toolCalls,
+      chunkSize,
+      logger,
+      overrides,
+    );
     const interruption = createInterruptionSignal(fixture);
     const completed = await writeEventStream(res, events, {
       latency,

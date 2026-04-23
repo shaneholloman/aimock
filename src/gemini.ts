@@ -93,25 +93,25 @@ export function geminiToCompletionRequest(
   }
 
   if (req.contents) {
+    let callCounter = 0;
     for (const content of req.contents) {
       const role = content.role ?? "user";
 
       if (role === "user") {
         // Check for functionResponse parts
         const funcResponses = content.parts.filter((p) => p.functionResponse);
-        const textParts = content.parts.filter((p) => p.text !== undefined);
+        const textParts = content.parts.filter((p) => p.text !== undefined && !p.thought);
 
         if (funcResponses.length > 0) {
           // functionResponse → tool message
-          for (let i = 0; i < funcResponses.length; i++) {
-            const part = funcResponses[i];
+          for (const part of funcResponses) {
             messages.push({
               role: "tool",
               content:
                 typeof part.functionResponse!.response === "string"
                   ? part.functionResponse!.response
                   : JSON.stringify(part.functionResponse!.response),
-              tool_call_id: `call_gemini_${part.functionResponse!.name}_${i}`,
+              tool_call_id: `call_gemini_${part.functionResponse!.name}_${callCounter++}`,
             });
           }
           // Any text parts alongside → user message
@@ -129,18 +129,19 @@ export function geminiToCompletionRequest(
       } else if (role === "model") {
         // Check for functionCall parts
         const funcCalls = content.parts.filter((p) => p.functionCall);
-        const textParts = content.parts.filter((p) => p.text !== undefined);
+        const textParts = content.parts.filter((p) => p.text !== undefined && !p.thought);
 
         if (funcCalls.length > 0) {
+          const text = textParts.map((p) => p.text!).join("");
           messages.push({
             role: "assistant",
-            content: null,
-            tool_calls: funcCalls.map((p, i) => ({
-              id: `call_gemini_${p.functionCall!.name}_${i}`,
+            content: text || null,
+            tool_calls: funcCalls.map((fc) => ({
+              id: `call_gemini_${fc.functionCall!.name}_${callCounter++}`,
               type: "function" as const,
               function: {
-                name: p.functionCall!.name,
-                arguments: JSON.stringify(p.functionCall!.args),
+                name: fc.functionCall!.name,
+                arguments: JSON.stringify(fc.functionCall!.args ?? {}),
               },
             })),
           });
@@ -149,6 +150,9 @@ export function geminiToCompletionRequest(
           messages.push({ role: "assistant", content: text });
         }
       }
+      // Unrecognized roles (not "user" or "model") are silently dropped.
+      // Gemini only defines "user" and "model"; any other value indicates
+      // a malformed request or an unsupported future role.
     }
   }
 
@@ -562,7 +566,6 @@ export async function handleGemini(
         headers: flattenHeaders(req.headers),
         body: completionReq,
       },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -571,7 +574,7 @@ export async function handleGemini(
 
   if (!fixture) {
     if (defaults.record) {
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         completionReq,
@@ -581,13 +584,13 @@ export async function handleGemini(
         defaults,
         raw,
       );
-      if (outcome !== "not_configured") {
+      if (proxied) {
         journal.add({
           method: req.method ?? "POST",
           path,
           headers: flattenHeaders(req.headers),
           body: completionReq,
-          response: { status: res.statusCode ?? 200, fixture: null },
+          response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
         return;
       }
