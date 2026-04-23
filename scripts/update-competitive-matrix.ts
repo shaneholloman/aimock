@@ -45,6 +45,7 @@ const COMPETITORS: Competitor[] = [
   { name: "VidaiMock", repo: "vidaiUK/VidaiMock" },
   { name: "mock-llm", repo: "dwmkerr/mock-llm" },
   { name: "piyook/llm-mock", repo: "piyook/llm-mock" },
+  { name: "mokksy/ai-mocks", repo: "mokksy/ai-mocks" },
 ];
 
 const FEATURE_RULES: FeatureRule[] = [

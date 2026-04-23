@@ -1550,11 +1550,14 @@
             <thead>
               <tr>
                 <th>Capability</th>
-                <th class="col-aimock">aimock</th>
-                <th>MSW</th>
-                <th>VidaiMock</th>
-                <th>mock-llm</th>
-                <th>piyook/llm-mock</th>
+                <th class="col-aimock">
+                  <a href="https://github.com/CopilotKit/aimock">aimock</a>
+                </th>
+                <th><a href="https://github.com/mswjs/msw">MSW</a></th>
+                <th><a href="https://github.com/vidaiUK/VidaiMock">VidaiMock</a></th>
+                <th><a href="https://github.com/dwmkerr/mock-llm">mock-llm</a></th>
+                <th><a href="https://github.com/piyook/llm-mock">piyook/llm-mock</a></th>
+                <th><a href="https://github.com/mokksy/ai-mocks">mokksy/ai-mocks</a></th>
               </tr>
             </thead>
             <tbody>
@@ -1565,11 +1568,13 @@
                 <td><span class="yes">&#10003;</span></td>
                 <td><span class="yes">&#10003;</span> (Docker)</td>
                 <td><span class="yes">&#10003;</span></td>
+                <td><span class="yes">&#10003;</span> (Ktor)</td>
               </tr>
               <tr>
                 <td>Chat Completions SSE</td>
                 <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
                 <td><span class="manual">manual</span></td>
+                <td><span class="yes">&#10003;</span></td>
                 <td><span class="yes">&#10003;</span></td>
                 <td><span class="yes">&#10003;</span></td>
                 <td><span class="yes">&#10003;</span></td>
@@ -1581,6 +1586,7 @@
                 <td><span class="yes">&#10003;</span></td>
                 <td><span class="yes">&#10003;</span></td>
                 <td><span class="yes">&#10003;</span></td>
+                <td><span class="yes">&#10003;</span></td>
               </tr>
               <tr>
                 <td>Claude Messages API</td>
@@ -1588,6 +1594,7 @@
                 <td><span class="manual">manual</span></td>
                 <td><span class="yes">&#10003;</span></td>
                 <td><span class="no">&#10007;</span></td>
+                <td><span class="yes">&#10003;</span></td>
                 <td><span class="yes">&#10003;</span></td>
               </tr>
               <tr>
@@ -1597,14 +1604,7 @@
                 <td><span class="yes">&#10003;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="yes">&#10003;</span></td>
-              </tr>
-              <tr>
-                <td>WebSocket APIs</td>
-                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
+                <td><span class="yes">&#10003;</span></td>
               </tr>
               <tr>
                 <td>Multi-provider support</td>
@@ -1613,6 +1613,16 @@
                 <td>11 providers</td>
                 <td>OpenAI only</td>
                 <td>OpenAI only</td>
+                <td>5 providers</td>
+              </tr>
+              <tr>
+                <td>WebSocket APIs</td>
+                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
               </tr>
               <tr>
                 <td>Embeddings API</td>
@@ -1621,10 +1631,12 @@
                 <td><span class="yes">&#10003;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="yes">&#10003;</span></td>
+                <td><span class="yes">&#10003;</span></td>
               </tr>
               <tr>
                 <td>Image generation</td>
                 <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
@@ -1637,10 +1649,12 @@
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
               </tr>
               <tr>
                 <td>Audio transcription</td>
                 <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
@@ -1653,106 +1667,21 @@
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>Structured output / JSON mode</td>
-                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
-                <td><span class="manual">manual</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
               </tr>
               <tr>
-                <td>Sequential / stateful responses</td>
-                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
-                <td><span class="manual">manual</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="yes">&#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>Fixture files</td>
-                <td class="col-aimock"><span class="yes">JSON &#10003;</span></td>
-                <td>Code-only</td>
-                <td>Tera templates</td>
-                <td>YAML config</td>
-                <td>JSON templates</td>
-              </tr>
-              <tr>
-                <td>Programmatic API</td>
-                <td class="col-aimock"><span class="yes">&#10003;</span> (TypeScript/JS)</td>
-                <td><span class="yes">&#10003;</span> (TypeScript/JS)</td>
-                <td>No (binary only)</td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>Request journal</td>
-                <td class="col-aimock"><span class="yes">&#10003;</span></td>
-                <td><span class="manual">manual</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="yes">&#10003;</span></td>
-              </tr>
-              <tr>
-                <td>Error injection</td>
-                <td class="col-aimock"><span class="yes">&#10003;</span></td>
-                <td><span class="yes">&#10003;</span></td>
-                <td><span class="partial">partial</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>Docker + Helm</td>
-                <td class="col-aimock"><span class="yes">Both &#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td>Docker only</td>
-                <td><span class="yes">&#10003;</span> (Both)</td>
-                <td>Docker only</td>
-              </tr>
-              <tr>
-                <td>Drift detection</td>
-                <td class="col-aimock"><span class="yes">&#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>Chaos testing</td>
-                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="yes">&#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>Record &amp; replay</td>
+                <td>AG-UI event mocking</td>
                 <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>Prometheus metrics</td>
-                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="yes">&#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>Streaming physics</td>
-                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="yes">&#10003;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
               </tr>
               <tr>
                 <td>MCP tool mocking</td>
                 <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
@@ -1765,34 +1694,12 @@
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>AG-UI event mocking</td>
-                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>GitHub Action</td>
-                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-              </tr>
-              <tr>
-                <td>Vitest / Jest plugins</td>
-                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
-                <td><span class="no">&#10007;</span></td>
+                <td><span class="yes">&#10003;</span></td>
               </tr>
               <tr>
                 <td>Vector DB mocking</td>
                 <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
@@ -1805,6 +1712,133 @@
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
                 <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Record &amp; replay</td>
+                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Drift detection</td>
+                <td class="col-aimock"><span class="yes">&#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Sequential / stateful responses</td>
+                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="manual">manual</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="yes">&#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Request journal</td>
+                <td class="col-aimock"><span class="yes">&#10003;</span></td>
+                <td><span class="manual">manual</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="yes">&#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Error injection</td>
+                <td class="col-aimock"><span class="yes">&#10003;</span></td>
+                <td><span class="yes">&#10003;</span></td>
+                <td><span class="partial">partial</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Chaos testing</td>
+                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="yes">&#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Streaming physics</td>
+                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="yes">&#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Structured output / JSON mode</td>
+                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="manual">manual</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Programmatic API</td>
+                <td class="col-aimock"><span class="yes">&#10003;</span> (TypeScript/JS)</td>
+                <td><span class="yes">&#10003;</span> (TypeScript/JS)</td>
+                <td>No (binary only)</td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="yes">&#10003;</span> (Kotlin/JVM)</td>
+              </tr>
+              <tr>
+                <td>Fixture files</td>
+                <td class="col-aimock"><span class="yes">JSON &#10003;</span></td>
+                <td>Code-only</td>
+                <td>Tera templates</td>
+                <td>YAML config</td>
+                <td>JSON templates</td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>GitHub Action</td>
+                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Vitest / Jest plugins</td>
+                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Docker + Helm</td>
+                <td class="col-aimock"><span class="yes">Both &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td>Docker only</td>
+                <td><span class="yes">&#10003;</span> (Both)</td>
+                <td>Docker only</td>
+                <td><span class="no">&#10007;</span></td>
+              </tr>
+              <tr>
+                <td>Prometheus metrics</td>
+                <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="yes">&#10003;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
+                <td><span class="no">&#10007;</span></td>
               </tr>
               <tr>
                 <td>Dependencies</td>
@@ -1813,6 +1847,7 @@
                 <td>Zero (Rust)</td>
                 <td>Node+Express</td>
                 <td>Minimal</td>
+                <td>JVM (Kotlin)</td>
               </tr>
             </tbody>
           </table>

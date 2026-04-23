@@ -459,3 +459,120 @@ describe("buildMigrationRowPatterns", () => {
     expect(patterns).toContain("Streaming SSE");
   });
 });
+
+// ── parseCurrentMatrix reimplementation for testing ────────────────────────
+
+function parseCurrentMatrix(html: string): {
+  headers: string[];
+  rows: Map<string, Map<string, string>>;
+} {
+  const tableMatch = html.match(/<table class="comparison-table">([\s\S]*?)<\/table>/);
+  if (!tableMatch) {
+    throw new Error("Could not find comparison-table in HTML");
+  }
+  const tableHtml = tableMatch[1];
+
+  const thRegex = /<th[^>]*>[\s\S]*?<a[^>]*>(.*?)<\/a[\s\S]*?<\/th>/g;
+  const headers: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = thRegex.exec(tableHtml)) !== null) {
+    headers.push(m[1].trim());
+  }
+
+  const rows = new Map<string, Map<string, string>>();
+  const tbody = tableHtml.match(/<tbody>([\s\S]*?)<\/tbody>/)?.[1] ?? "";
+  let tr: RegExpExecArray | null;
+  const trIter = new RegExp(/<tr>([\s\S]*?)<\/tr>/g);
+
+  while ((tr = trIter.exec(tbody)) !== null) {
+    const tds: string[] = [];
+    const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/g;
+    let td: RegExpExecArray | null;
+    while ((td = tdRegex.exec(tr[1])) !== null) {
+      tds.push(td[1].trim());
+    }
+    if (tds.length < 2) continue;
+
+    const rowLabel = tds[0];
+    const rowMap = new Map<string, string>();
+    for (let i = 1; i < tds.length && i - 1 < headers.length; i++) {
+      rowMap.set(headers[i - 1], tds[i]);
+    }
+    rows.set(rowLabel, rowMap);
+  }
+
+  return { headers, rows };
+}
+
+describe("parseCurrentMatrix header extraction", () => {
+  const MATRIX_WITH_LINKS = `
+<table class="comparison-table">
+  <thead>
+    <tr>
+      <th>Capability</th>
+      <th class="col-aimock"><a href="https://github.com/CopilotKit/aimock">aimock</a></th>
+      <th><a href="https://github.com/mswjs/msw">MSW</a></th>
+      <th><a href="https://github.com/vidaiUK/VidaiMock">VidaiMock</a></th>
+      <th><a href="https://github.com/dwmkerr/mock-llm">mock-llm</a></th>
+      <th><a href="https://github.com/piyook/llm-mock">piyook/llm-mock</a></th>
+      <th><a href="https://github.com/mokksy/ai-mocks">mokksy/ai-mocks</a></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Chat Completions SSE</td>
+      <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+      <td><span class="manual">manual</span></td>
+      <td><span class="yes">&#10003;</span></td>
+      <td><span class="yes">&#10003;</span></td>
+      <td><span class="yes">&#10003;</span></td>
+      <td><span class="yes">&#10003;</span></td>
+    </tr>
+    <tr>
+      <td>WebSocket APIs</td>
+      <td class="col-aimock"><span class="yes">Built-in &#10003;</span></td>
+      <td><span class="no">&#10007;</span></td>
+      <td><span class="no">&#10007;</span></td>
+      <td><span class="no">&#10007;</span></td>
+      <td><span class="no">&#10007;</span></td>
+      <td class="no">No</td>
+    </tr>
+  </tbody>
+</table>`;
+
+  it("extracts all 6 competitor headers from linked <th> elements", () => {
+    const { headers } = parseCurrentMatrix(MATRIX_WITH_LINKS);
+    expect(headers).toHaveLength(6);
+    expect(headers).toEqual([
+      "aimock",
+      "MSW",
+      "VidaiMock",
+      "mock-llm",
+      "piyook/llm-mock",
+      "mokksy/ai-mocks",
+    ]);
+  });
+
+  it("maps each header to the correct column index", () => {
+    const { headers } = parseCurrentMatrix(MATRIX_WITH_LINKS);
+    expect(headers[0]).toBe("aimock");
+    expect(headers[1]).toBe("MSW");
+    expect(headers[2]).toBe("VidaiMock");
+    expect(headers[3]).toBe("mock-llm");
+    expect(headers[4]).toBe("piyook/llm-mock");
+    expect(headers[5]).toBe("mokksy/ai-mocks");
+  });
+
+  it("correctly parses row data for each competitor column", () => {
+    const { rows } = parseCurrentMatrix(MATRIX_WITH_LINKS);
+    const chatRow = rows.get("Chat Completions SSE");
+    expect(chatRow).toBeDefined();
+    expect(chatRow!.get("mokksy/ai-mocks")).toContain("&#10003;");
+  });
+
+  it("fails to parse headers when <th> lacks <a> anchor tags", () => {
+    const noLinks = MATRIX_WITH_LINKS.replace(/<a[^>]*>(.*?)<\/a>/g, "$1");
+    const { headers } = parseCurrentMatrix(noLinks);
+    expect(headers).toHaveLength(0);
+  });
+});
