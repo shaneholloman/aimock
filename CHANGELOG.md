@@ -1,5 +1,16 @@
 # @copilotkit/aimock
 
+## 1.14.9
+
+### Fixed
+
+- Removed the `preinstall: npx only-allow pnpm` script from the published package. That
+  hook was intended to guide contributors cloning the monorepo toward pnpm, but it got
+  bundled into the published tarball and fired during `npm install -g @copilotkit/aimock`,
+  aborting the install with `sh: only-allow: not found` before npm could even resolve the
+  binary. The guard belongs on the monorepo root, not inside the shipped package.
+  Unblocks CopilotKit's docs CI (and any other consumer installing aimock via npm).
+
 ## 1.14.8
 
 ### Fixed
