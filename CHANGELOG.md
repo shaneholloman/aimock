@@ -1,5 +1,24 @@
 # @copilotkit/aimock
 
+## Unreleased
+
+### Added
+
+- Chaos injection in proxy mode: drop and disconnect fire pre-flight (upstream is never
+  contacted), malformed proxies the request then corrupts the response body before
+  delivering it to the client.
+- SSE streaming bypass: when upstream responds with `text/event-stream`, malformed chaos
+  is silently skipped (bytes are already on the wire). A bypass metric
+  (`aimock_chaos_bypassed_total`) is emitted so operators can see the configured action
+  did not fire; the normal `aimock_chaos_triggered_total` counter does not increment.
+- Chaos source label (`fixture` vs `proxy`) on Prometheus metrics and journal entries,
+  distinguishing where the chaos decision was made.
+- CORS `Access-Control-Allow-Headers` now includes `X-Aimock-Chaos-Drop`,
+  `X-Aimock-Chaos-Malformed`, `X-Aimock-Chaos-Disconnect`, and `X-Test-Id`, enabling
+  browser-based clients to send per-request chaos overrides via preflight-safe headers.
+- `handleVideoStatus` (`GET /v1/videos/:id`) now evaluates chaos before returning video
+  state, consistent with all other handler endpoints.
+
 ## 1.14.9
 
 ### Fixed
