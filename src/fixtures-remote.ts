@@ -1,11 +1,117 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, statSync } from "node:fs";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { BlockList, isIP } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 import type { Logger } from "./logger.js";
 
 export const REMOTE_FETCH_TIMEOUT_MS = 10_000;
 export const REMOTE_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/**
+ * Private / reserved address ranges blocked by default to prevent SSRF.
+ *
+ * The list covers RFC1918 / CGNAT / loopback / link-local / cloud-metadata /
+ * ULA / multicast / unspecified — any destination that could let an attacker
+ * pivot a fetch into the local network or cloud control plane via a hostile
+ * `--fixtures` URL.  Set `AIMOCK_ALLOW_PRIVATE_URLS=1` to opt out (required
+ * for local dev / tests that target 127.0.0.1).
+ */
+const PRIVATE_V4_RANGES: Array<[string, number]> = [
+  ["0.0.0.0", 8], // "this network"
+  ["10.0.0.0", 8], // RFC1918
+  ["100.64.0.0", 10], // CGNAT
+  ["127.0.0.0", 8], // loopback
+  ["169.254.0.0", 16], // link-local / cloud metadata
+  ["172.16.0.0", 12], // RFC1918
+  ["192.0.0.0", 24], // IETF protocol assignments
+  ["192.0.2.0", 24], // TEST-NET-1
+  ["192.88.99.0", 24], // 6to4 relay anycast (deprecated)
+  ["192.168.0.0", 16], // RFC1918
+  ["198.18.0.0", 15], // benchmarking
+  ["198.51.100.0", 24], // TEST-NET-2
+  ["203.0.113.0", 24], // TEST-NET-3
+  ["224.0.0.0", 4], // multicast
+  ["240.0.0.0", 4], // reserved
+  ["255.255.255.255", 32], // broadcast
+];
+
+const PRIVATE_V6_RANGES: Array<[string, number]> = [
+  ["::", 128], // unspecified
+  ["::1", 128], // loopback
+  ["fc00::", 7], // ULA
+  ["fe80::", 10], // link-local
+];
+
+function buildBlockList(): BlockList {
+  const bl = new BlockList();
+  for (const [addr, prefix] of PRIVATE_V4_RANGES) bl.addSubnet(addr, prefix, "ipv4");
+  for (const [addr, prefix] of PRIVATE_V6_RANGES) bl.addSubnet(addr, prefix, "ipv6");
+  return bl;
+}
+
+const PRIVATE_BLOCKLIST: BlockList = buildBlockList();
+
+/**
+ * Returns true if `address` is a literal IP (v4 or v6) that falls in any
+ * blocked range (loopback, RFC1918, CGNAT, link-local, cloud-metadata,
+ * ULA, multicast, unspecified, reserved).  Returns false for public IPs
+ * and for non-literal hostnames.
+ */
+export function isPrivateAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 0) return false; // not a literal IP
+  // BlockList.check's "ipv6" bucket does not match v4-mapped ::ffff:a.b.c.d
+  // automatically — unwrap to the underlying v4 address and recurse.
+  if (family === 6) {
+    const lower = address.toLowerCase();
+    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isPrivateAddress(mapped[1]);
+  }
+  return PRIVATE_BLOCKLIST.check(address, family === 4 ? "ipv4" : "ipv6");
+}
+
+function privateUrlsAllowed(): boolean {
+  const v = process.env.AIMOCK_ALLOW_PRIVATE_URLS;
+  return v === "1" || v === "true";
+}
+
+/**
+ * Throws if `hostname` resolves to (or literally is) a private / reserved
+ * address, unless `AIMOCK_ALLOW_PRIVATE_URLS=1` is set.  If the hostname is
+ * not a literal IP, all resolved addresses are checked — any blocked
+ * address in the set rejects the host.
+ */
+export async function assertAllowedHost(hostname: string): Promise<void> {
+  if (privateUrlsAllowed()) return;
+
+  if (isIP(hostname) !== 0) {
+    if (isPrivateAddress(hostname)) {
+      throw new Error(
+        `Refusing to fetch from private address ${hostname}: not allowed by default (set AIMOCK_ALLOW_PRIVATE_URLS=1 to override)`,
+      );
+    }
+    return;
+  }
+
+  let addresses: Array<{ address: string; family: number }>;
+  try {
+    addresses = await dnsLookup(hostname, { all: true });
+  } catch (err) {
+    // DNS failure is not an SSRF signal — let the fetch itself surface the
+    // resolution error with its own (more detailed) message.
+    void err;
+    return;
+  }
+  for (const a of addresses) {
+    if (isPrivateAddress(a.address)) {
+      throw new Error(
+        `Refusing to fetch from ${hostname}: resolves to private address ${a.address} (set AIMOCK_ALLOW_PRIVATE_URLS=1 to override)`,
+      );
+    }
+  }
+}
 
 export interface RemoteResolveOptions {
   validateOnLoad: boolean;
@@ -94,6 +200,11 @@ async function resolveHttpFixture(
   const cacheFile = join(cacheDir, "fixtures.json");
 
   try {
+    // SSRF defense: reject private / reserved destinations before any network
+    // I/O, unless explicitly opted in via AIMOCK_ALLOW_PRIVATE_URLS=1.
+    const parsed = new URL(url);
+    await assertAllowedHost(parsed.hostname);
+
     const body = await fetchWithLimits(url, fetchImpl, timeoutMs, maxBytes);
     // Parse to verify it is valid JSON before caching — fail loud if not.
     JSON.parse(body);
@@ -138,7 +249,19 @@ async function fetchWithLimits(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
   try {
-    const res = await fetchImpl(url, { signal: controller.signal });
+    // Redirects are disabled: following a 3xx into a different scheme or host
+    // would bypass the scheme check and SSRF denylist.  Upstream services
+    // should serve the final URL directly (e.g. GitHub raw content URLs).
+    const res = await fetchImpl(url, {
+      signal: controller.signal,
+      redirect: "manual",
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location") ?? "<none>";
+      throw new Error(
+        `redirect not allowed: upstream returned ${res.status} → ${location} (configure the upstream to serve the final URL directly; redirects are disabled to prevent scheme-bypass)`,
+      );
+    }
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} ${res.statusText}`);
     }
