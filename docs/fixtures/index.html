@@ -91,7 +91,10 @@
             <tr>
               <td>userMessage</td>
               <td>string | RegExp</td>
-              <td>Substring or regex match on the last user message</td>
+              <td>
+                Match on the last user message &mdash; string (substring, or exact when
+                <code>requestTransform</code> is set) or regex (pattern match)
+              </td>
             </tr>
             <tr>
               <td>inputText</td>
@@ -101,12 +104,18 @@
             <tr>
               <td>toolCallId</td>
               <td>string</td>
-              <td>Match on tool_call_id in the last message</td>
+              <td>
+                Match on <code>tool_call_id</code> of the last <code>role: "tool"</code> message.
+                The <code>onToolResult(id, response)</code> helper is sugar over this field
+              </td>
             </tr>
             <tr>
               <td>toolName</td>
               <td>string</td>
-              <td>Match on tool function name</td>
+              <td>
+                Match on tool function name &mdash; compared against the names of tool definitions
+                in the request&rsquo;s <code>tools:</code> array
+              </td>
             </tr>
             <tr>
               <td>model</td>
@@ -127,7 +136,9 @@
               <td>endpoint</td>
               <td>string</td>
               <td>
-                Restrict to endpoint type: chat, image, speech, transcription, video, embedding
+                Restrict to endpoint type: chat, image, speech, transcription, video, embedding.
+                Search, rerank, and moderation services (added in 1.7.0) are registered through
+                their own fixture APIs rather than via this field
               </td>
             </tr>
             <tr>
@@ -137,6 +148,114 @@
             </tr>
           </tbody>
         </table>
+
+        <h2>Matching Semantics</h2>
+        <p>
+          These are the rules the router uses to pick a fixture for a given request. All fields on
+          <code>match</code> are AND-ed &mdash; every one must pass for the fixture to be selected.
+        </p>
+
+        <h3>1. <code>userMessage</code> matches only the LAST user message</h3>
+        <p>
+          <code>userMessage</code> is compared against the content of the <em>last</em> message with
+          <code>role: "user"</code> in the request. Earlier user messages in the conversation
+          history are ignored. A request that contains ten turns of prior history plus one new user
+          turn only matches against that final turn &mdash; never against anything earlier.
+        </p>
+        <p>
+          This is the single rule that trips people up most often. If you need to differentiate
+          conversations by earlier context (for example, to return a different response on the
+          second round of a tool-using conversation), use <code>toolCallId</code>,
+          <code>sequenceIndex</code>, or a <code>predicate</code> instead of piling keywords into
+          <code>userMessage</code>. See <a href="/multi-turn">Multi-Turn Conversations</a> for the
+          tool-round idiom.
+        </p>
+
+        <h3>2. <code>toolCallId</code> matches the LAST tool message</h3>
+        <p>
+          <code>toolCallId</code> is compared against the <code>tool_call_id</code> of the
+          <em>last <code>role: "tool"</code> message</em> in the request &mdash; regardless of
+          whether that&rsquo;s the overall last message. If no tool message is present in the
+          history, <code>toolCallId</code> never matches. See
+          <a href="/multi-turn">Multi-Turn Conversations</a> for the tool-round idiom.
+        </p>
+
+        <h3>3. First match wins, in file order</h3>
+        <p>
+          Fixtures are evaluated in the order they were registered. The first fixture whose
+          <code>match</code> criteria all pass is returned &mdash; subsequent fixtures are not
+          consulted. For file-loaded fixtures, that means order within the JSON array. For
+          <code>loadFixtureDir()</code>, files are loaded in sorted filename order, so a
+          <code>00-catchall.json</code> loaded before <code>10-specific.json</code> will shadow the
+          specific fixture. Put more specific fixtures before broader ones.
+        </p>
+        <p>
+          <code>sequenceIndex</code> lets a single pattern return different responses on repeated
+          matches &mdash; see <a href="/sequential-responses">Sequential Responses</a>.
+        </p>
+
+        <h3>4. Substring by default, exact when a <code>requestTransform</code> is set</h3>
+        <p>
+          By default, string <code>userMessage</code> (and <code>inputText</code>) match via
+          <code>String.includes</code> &mdash; <code>userMessage: "hello"</code> matches
+          <code>"say hello world"</code>. Pass a <code>RegExp</code> when you need pattern matching.
+          When a <code>requestTransform</code> is configured, this behavior flips to strict equality
+          &mdash; see the next paragraph for why.
+        </p>
+        <p>
+          If the router is configured with a <code>requestTransform</code> (typically used to strip
+          dynamic data like timestamps or UUIDs from the request before matching), string
+          <code>userMessage</code> and <code>inputText</code> flip to strict equality
+          (<code>===</code>). The rationale: transforms normalize requests to a canonical form, and
+          once normalized, the sensible comparison is exact &mdash; substring matching on a
+          normalized string is more likely to hide bugs than catch flexible input.
+        </p>
+
+        <h3>5. Validation warnings surface shadowing at load time</h3>
+        <p>
+          <code>validateFixtures()</code> runs when fixtures are loaded and emits warnings for
+          common shadowing mistakes:
+        </p>
+        <ul>
+          <li>
+            <strong>Duplicate <code>userMessage</code></strong> &mdash; two fixtures with the same
+            string <code>userMessage</code> produce a warning of the form
+            <code>duplicate userMessage 'hello' — shadows fixture 0</code>, where
+            <code>'hello'</code> is the duplicated message and <code>0</code> is the zero-based
+            index of the earlier fixture being shadowed. This is advisory, not a hard error: the
+            check looks at <code>userMessage</code> alone, so if you've added a runtime
+            differentiator (<code>sequenceIndex</code>, <code>toolCallId</code>, <code>model</code>,
+            or a <code>predicate</code>) the fixtures won't actually shadow each other at match
+            time. Only fixtures with no differentiator at all truly shadow on match &mdash; that's
+            the case where the second is never reached because the first wins. Safe to ignore in the
+            former case; investigate in the latter.
+          </li>
+          <li>
+            <strong>Catch-all not last</strong> &mdash; a fixture with an empty <code>match</code>
+            (no discriminator fields) matches everything. If it is not the final fixture, every
+            fixture after it is unreachable. The warning is of the form
+            <code
+              >empty match acts as catch-all but is not the last fixture — shadows fixtures 3+</code
+            >, where <code>3</code> is the zero-based index of the first shadowed fixture (i.e.
+            every fixture from that index onward).
+          </li>
+        </ul>
+
+        <h3>6. Use <code>predicate</code> for arbitrary logic</h3>
+        <p>
+          When the built-in match fields can't express the condition you need, a
+          <code>predicate</code> function receives the full request and returns a boolean. It is the
+          escape hatch for anything from inspecting the assistant's prior tool call arguments to
+          gating on system-prompt content. Predicates are programmatic-only &mdash; JSON fixture
+          files cannot serialize functions.
+        </p>
+        <div class="code-block">
+          <div class="code-block-header">predicate.ts <span class="lang-tag">ts</span></div>
+          <pre><code><span class="op">mock</span>.<span class="fn">on</span>(
+  { <span class="prop">predicate</span>: (<span class="op">req</span>) <span class="kw">=&gt;</span> <span class="op">req</span>.<span class="prop">messages</span>.<span class="fn">at</span>(-<span class="num">1</span>)?.<span class="prop">role</span> === <span class="str">"tool"</span> },
+  { <span class="prop">content</span>: <span class="str">"Done!"</span> }
+);</code></pre>
+        </div>
 
         <h2>Response Types</h2>
 
@@ -263,12 +382,13 @@
               <td>string</td>
               <td>
                 Override finish reason (default: "stop" or "tool_calls"). Provider mappings:
-                <code>stop</code> &rarr; <code>end_turn</code> (Claude), <code>STOP</code> (Gemini);
-                <code>tool_calls</code> &rarr; <code>tool_use</code> (Claude),
-                <code>FUNCTION_CALL</code> (Gemini); <code>length</code> &rarr;
-                <code>max_tokens</code> (Claude), <code>MAX_TOKENS</code> (Gemini);
-                <code>content_filter</code> &rarr; <code>SAFETY</code> (Gemini),
-                <code>failed</code> (Responses API)
+                <code>stop</code> &rarr; <code>end_turn</code> (Claude), <code>STOP</code> (Gemini),
+                <code>completed</code> (Responses API); <code>tool_calls</code> &rarr;
+                <code>tool_use</code> (Claude), <code>FUNCTION_CALL</code> (Gemini),
+                <code>completed</code> (Responses API); <code>length</code> &rarr;
+                <code>max_tokens</code> (Claude), <code>MAX_TOKENS</code> (Gemini),
+                <code>incomplete</code> (Responses API); <code>content_filter</code> &rarr;
+                <code>SAFETY</code> (Gemini), <code>failed</code> (Responses API)
               </td>
             </tr>
             <tr>
@@ -381,28 +501,19 @@
 );</code></pre>
         </div>
 
-        <h2>Routing Rules</h2>
-        <ul>
-          <li>
-            <strong>First match wins</strong> &mdash; fixtures are checked in registration order
-          </li>
-          <li>
-            <strong>All match fields must pass</strong> &mdash; multiple match fields are AND-ed
-          </li>
-          <li>
-            <strong>Substring matching</strong> &mdash; <code>userMessage: "hello"</code> matches
-            <code>"say hello world"</code>
-          </li>
-          <li>
-            <strong>Cross-provider</strong> &mdash; the same fixtures work for OpenAI, Claude, and
-            Gemini requests
-          </li>
-        </ul>
-
         <div class="info-box">
           <p>
             JSON files cannot use <code>predicate</code> (functions can't be serialized). Use
             programmatic registration for predicate-based routing.
+          </p>
+        </div>
+
+        <div class="info-box">
+          <p>
+            <code>onTranscription</code> takes the response object directly &mdash; there is no
+            user-provided input to match against, unlike <code>onMessage</code> /
+            <code>onToolCall</code> / <code>onEmbedding</code>. Every transcription request matches
+            the same fixture.
           </p>
         </div>
 
@@ -415,6 +526,7 @@
               <th>OpenAI Responses</th>
               <th>Claude</th>
               <th>Gemini</th>
+              <th>Vertex AI</th>
               <th>Bedrock</th>
               <th>Azure</th>
               <th>Ollama</th>
@@ -424,6 +536,7 @@
           <tbody>
             <tr>
               <td>Text</td>
+              <td>Yes</td>
               <td>Yes</td>
               <td>Yes</td>
               <td>Yes</td>
@@ -443,6 +556,7 @@
               <td>Yes</td>
               <td>Yes</td>
               <td>Yes</td>
+              <td>Yes</td>
             </tr>
             <tr>
               <td>Content + Tool Calls</td>
@@ -454,9 +568,11 @@
               <td>Yes</td>
               <td>Yes</td>
               <td>Yes</td>
+              <td>Yes</td>
             </tr>
             <tr>
               <td>Streaming</td>
+              <td>SSE</td>
               <td>SSE</td>
               <td>SSE</td>
               <td>SSE</td>
@@ -474,13 +590,15 @@
               <td>Yes</td>
               <td>Yes</td>
               <td>Yes</td>
-              <td>&mdash;</td>
+              <td>Yes</td>
+              <td>Yes</td>
               <td>&mdash;</td>
             </tr>
             <tr>
               <td>Web Searches</td>
               <td>&mdash;</td>
               <td>Yes</td>
+              <td>&mdash;</td>
               <td>&mdash;</td>
               <td>&mdash;</td>
               <td>&mdash;</td>
@@ -494,13 +612,18 @@
               <td>Yes</td>
               <td>Yes</td>
               <td>Yes</td>
-              <td>&mdash;</td>
               <td>Yes</td>
+              <td>&mdash;</td>
+              <td>Yes<sup>*</sup></td>
               <td>&mdash;</td>
               <td>&mdash;</td>
             </tr>
           </tbody>
         </table>
+        <p class="footnote">
+          <sup>*</sup> Azure inherits OpenAI&rsquo;s override support because Azure OpenAI routes
+          through the OpenAI Chat Completions response format internally.
+        </p>
       </main>
       <aside class="page-toc" id="page-toc"></aside>
     </div>

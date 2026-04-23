@@ -183,7 +183,7 @@
             <pre><code><span class="kw">from</span> openai <span class="kw">import</span> OpenAI
 
 <span class="kw">def</span> <span class="fn">test_chat</span>(aimock):
-    aimock.on_message(<span class="str">"hi"</span>, content=<span class="str">"Hello!"</span>)
+    aimock.on_message(<span class="str">"hi"</span>, {<span class="str">"content"</span>: <span class="str">"Hello!"</span>})
     client = OpenAI(base_url=aimock.url + <span class="str">"/v1"</span>, api_key=<span class="str">"test"</span>)
     result = client.chat.completions.create(
         model=<span class="str">"gpt-4o"</span>, messages=[{<span class="str">"role"</span>: <span class="str">"user"</span>, <span class="str">"content"</span>: <span class="str">"hi"</span>}]
@@ -266,7 +266,7 @@
             </tr>
             <tr>
               <td><code>openai_mock.chat.completions.create.response = {...}</code></td>
-              <td><code>aimock.on_message("pattern", content="...")</code></td>
+              <td><code>aimock.on_message("pattern", {"content": "..."})</code></td>
             </tr>
             <tr>
               <td>Partial envelope (choices required, other fields auto-filled)</td>
@@ -297,7 +297,9 @@
             </tr>
             <tr>
               <td style="color: var(--error)">&#10007; No record/replay</td>
-              <td><code>npx aimock --record</code> captures real API calls</td>
+              <td>
+                <code>npx -p @copilotkit/aimock llmock --record</code> captures real API calls
+              </td>
             </tr>
             <tr>
               <td style="color: var(--error)">&#10007; No CI action</td>
@@ -326,8 +328,8 @@
             <div class="feature-icon blue">&#9889;</div>
             <h3>Built-in SSE for 10+ providers</h3>
             <p>
-              OpenAI, Claude, Gemini, Bedrock, Azure, Vertex AI, Ollama, Cohere. No manual chunk
-              construction.
+              OpenAI (Chat, Responses, Realtime), Claude, Gemini (REST and Live), Bedrock, Azure,
+              Vertex AI, Ollama, Cohere. No manual chunk construction.
             </p>
           </div>
           <div class="feature-card">
@@ -343,7 +345,10 @@
             <h3>Record &amp; Replay</h3>
             <p>
               Proxy real APIs, save as fixtures, replay forever.
-              <code>npx aimock --record --provider-openai https://api.openai.com</code>
+              <code
+                >npx -p @copilotkit/aimock llmock --record --provider-openai
+                https://api.openai.com</code
+              >
             </p>
           </div>
           <div class="feature-card">
@@ -403,7 +408,7 @@
           <div class="tab-cli">
             <div class="code-block">
               <div class="code-block-header">CLI <span class="lang-tag">sh</span></div>
-              <pre><code>npx aimock -p <span class="num">4010</span> -f ./fixtures</code></pre>
+              <pre><code>npx -p @copilotkit/aimock llmock -p <span class="num">4010</span> -f ./fixtures</code></pre>
             </div>
           </div>
           <div class="tab-docker">
@@ -412,7 +417,7 @@
               <pre><code>docker run -d -p <span class="num">4010</span>:<span class="num">4010</span> \
   -v <span class="str">$(pwd)/fixtures:/fixtures</span> \
   ghcr.io/copilotkit/aimock:latest \
-  -p <span class="num">4010</span> -f /fixtures</code></pre>
+  -p <span class="num">4010</span> -f /fixtures -h 0.0.0.0</code></pre>
             </div>
           </div>
         </div>
