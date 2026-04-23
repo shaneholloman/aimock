@@ -77,6 +77,24 @@ export async function handleImages(
     return;
   }
 
+  if (!prompt) {
+    journal.add({
+      method,
+      path,
+      headers: flattenHeaders(req.headers),
+      body: null,
+      response: { status: 400, fixture: null },
+    });
+    writeErrorResponse(
+      res,
+      400,
+      JSON.stringify({
+        error: { message: "Missing required parameter: 'prompt'", type: "invalid_request_error" },
+      }),
+    );
+    return;
+  }
+
   const syntheticReq = buildSyntheticRequest(model, prompt);
   const testId = getTestId(req);
   const fixture = matchFixture(
@@ -98,7 +116,6 @@ export async function handleImages(
       req.headers,
       journal,
       { method, path, headers: flattenHeaders(req.headers), body: syntheticReq },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -107,7 +124,7 @@ export async function handleImages(
 
   if (!fixture) {
     if (defaults.record) {
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         syntheticReq,
@@ -117,13 +134,13 @@ export async function handleImages(
         defaults,
         raw,
       );
-      if (outcome !== "not_configured") {
+      if (proxied) {
         journal.add({
           method,
           path,
           headers: flattenHeaders(req.headers),
           body: syntheticReq,
-          response: { status: res.statusCode ?? 200, fixture: null },
+          response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
         return;
       }

@@ -1,23 +1,33 @@
 # @copilotkit/aimock
 
-## 1.15.0
+## 1.15.1
 
-### Added
+### Fixed
 
-- Chaos injection in proxy mode: drop and disconnect fire pre-flight (upstream is never
-  contacted), malformed proxies the request then corrupts the response body before
-  delivering it to the client.
-- SSE streaming bypass: when upstream responds with `text/event-stream`, malformed chaos
-  is silently skipped (bytes are already on the wire). A bypass metric
-  (`aimock_chaos_bypassed_total`) is emitted so operators can see the configured action
-  did not fire; the normal `aimock_chaos_triggered_total` counter does not increment.
-- Chaos source label (`fixture` vs `proxy`) on Prometheus metrics and journal entries,
-  distinguishing where the chaos decision was made.
-- CORS `Access-Control-Allow-Headers` now includes `X-Aimock-Chaos-Drop`,
-  `X-Aimock-Chaos-Malformed`, `X-Aimock-Chaos-Disconnect`, and `X-Test-Id`, enabling
-  browser-based clients to send per-request chaos overrides via preflight-safe headers.
-- `handleVideoStatus` (`GET /v1/videos/:id`) now evaluates chaos before returning video
-  state, consistent with all other handler endpoints.
+- **Recorder**: crash hardening (headersSent guards, clientDisconnected tracking),
+  preserve content alongside toolCalls, Cohere v2 native detection, tool-call ID
+  extraction from 5 providers, reasoning/thinking extraction from 4 providers,
+  multi-block text join (filter+join instead of find), thinking-only and empty-content
+  response handling, Ollama /api/generate format detection, streaming collapse
+  reasoning propagation.
+- **Bedrock/Converse**: ContentWithToolCallsResponse support, ResponseOverrides wired
+  into all non-streaming and streaming builders, Converse-wrapped stream event format,
+  text_delta type field on text deltas, proper error envelope on Converse errors,
+  webSearches warnings.
+- **Cohere v2**: reasoning in all builders + streaming, webSearches warnings,
+  response_format forwarding, assistant tool_calls preservation, full
+  ResponseOverrides (finish_reason, usage, id) in non-streaming and streaming paths.
+- **Server**: readBody 10MB size limit, control API error detail, one-shot error fixture
+  race fix, normalizeCompatPath clarity, fixtures_loaded gauge updates on mutations.
+- **Competitive matrix**: HTML pipeline fixed (computeChanges, applyChanges,
+  updateProviderCounts, extractFeatures all aligned with actual DOM structure).
+- **CI workflows**: --auto merge (respects branch protection), Slack secrets via env
+  vars, script injection prevention in notify-pr.yml, portable grep.
+- **Router**: RegExp g-flag lastIndex reset prevents alternating match/no-match.
+- **Jest/Vitest**: save/restore pre-existing env vars in afterAll, loadFixtures
+  console.warn on failure.
+- **Gemini**: tool_call_id collision fix (shared callCounter), thought-part filtering.
+- **Ollama**: ContentWithToolCallsResponse support, default stream:true, field validation.
 
 ## 1.14.9
 

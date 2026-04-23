@@ -13,8 +13,60 @@ interface VideoRequest {
   [key: string]: unknown;
 }
 
-/** Stored video state for GET status checks. Key: `${testId}:${videoId}` */
-export type VideoStateMap = Map<string, VideoResponse["video"]>;
+// ─── VideoStateMap with TTL and size bound ────────────────────────────────
+
+const VIDEO_STATE_MAX_ENTRIES = 10_000;
+const VIDEO_STATE_TTL_MS = 3_600_000; // 1 hour
+
+interface VideoStateEntry {
+  video: VideoResponse["video"];
+  createdAt: number;
+}
+
+/**
+ * A Map wrapper for video state that enforces a maximum size and per-entry TTL.
+ * Entries older than VIDEO_STATE_TTL_MS are lazily evicted on `get`.
+ * When the map exceeds VIDEO_STATE_MAX_ENTRIES on `set`, the oldest entries
+ * are removed to stay within bounds.
+ */
+export class VideoStateMap {
+  private readonly entries = new Map<string, VideoStateEntry>();
+
+  get(key: string): VideoResponse["video"] | undefined {
+    const entry = this.entries.get(key);
+    if (!entry) return undefined;
+    if (Date.now() - entry.createdAt > VIDEO_STATE_TTL_MS) {
+      this.entries.delete(key);
+      return undefined;
+    }
+    return entry.video;
+  }
+
+  set(key: string, video: VideoResponse["video"]): void {
+    this.entries.set(key, { video, createdAt: Date.now() });
+    // Evict oldest entries if over capacity
+    if (this.entries.size > VIDEO_STATE_MAX_ENTRIES) {
+      const excess = this.entries.size - VIDEO_STATE_MAX_ENTRIES;
+      const iter = this.entries.keys();
+      for (let i = 0; i < excess; i++) {
+        const next = iter.next();
+        if (!next.done) this.entries.delete(next.value);
+      }
+    }
+  }
+
+  delete(key: string): boolean {
+    return this.entries.delete(key);
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+}
 
 export async function handleVideoCreate(
   req: http.IncomingMessage,
@@ -51,6 +103,24 @@ export async function handleVideoCreate(
     return;
   }
 
+  if (!videoReq.prompt) {
+    journal.add({
+      method,
+      path,
+      headers: flattenHeaders(req.headers),
+      body: null,
+      response: { status: 400, fixture: null },
+    });
+    writeErrorResponse(
+      res,
+      400,
+      JSON.stringify({
+        error: { message: "Missing required parameter: 'prompt'", type: "invalid_request_error" },
+      }),
+    );
+    return;
+  }
+
   const syntheticReq: ChatCompletionRequest = {
     model: videoReq.model ?? "sora-2",
     messages: [{ role: "user", content: videoReq.prompt }],
@@ -77,7 +147,6 @@ export async function handleVideoCreate(
       req.headers,
       journal,
       { method, path, headers: flattenHeaders(req.headers), body: syntheticReq },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -86,7 +155,7 @@ export async function handleVideoCreate(
 
   if (!fixture) {
     if (defaults.record) {
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         syntheticReq,
@@ -96,13 +165,13 @@ export async function handleVideoCreate(
         defaults,
         raw,
       );
-      if (outcome !== "not_configured") {
+      if (proxied) {
         journal.add({
           method,
           path,
           headers: flattenHeaders(req.headers),
           body: syntheticReq,
-          response: { status: res.statusCode ?? 200, fixture: null },
+          response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
         return;
       }
@@ -191,28 +260,12 @@ export function handleVideoStatus(
   res: http.ServerResponse,
   videoId: string,
   journal: Journal,
-  defaults: HandlerDefaults,
   setCorsHeaders: (res: http.ServerResponse) => void,
   videoStates: VideoStateMap,
 ): void {
   setCorsHeaders(res);
   const path = req.url ?? `/v1/videos/${videoId}`;
   const method = req.method ?? "GET";
-
-  if (
-    applyChaos(
-      res,
-      null,
-      defaults.chaos,
-      req.headers,
-      journal,
-      { method, path, headers: flattenHeaders(req.headers), body: null },
-      "fixture",
-      defaults.registry,
-      defaults.logger,
-    )
-  )
-    return;
 
   const testId = getTestId(req);
   const stateKey = `${testId}:${videoId}`;

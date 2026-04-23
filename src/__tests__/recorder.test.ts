@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Fixture, FixtureFile } from "../types.js";
 import { createServer, type ServerInstance } from "../server.js";
-import { proxyAndRecord, type ProxyCapturedResponse } from "../recorder.js";
+import { proxyAndRecord } from "../recorder.js";
 import type { RecordConfig } from "../types.js";
 import { Logger } from "../logger.js";
 import { LLMock } from "../llmock.js";
@@ -110,13 +110,13 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe("proxyAndRecord", () => {
-  it('returns "not_configured" when provider is not configured', async () => {
+  it("returns false when provider is not configured", async () => {
     const fixtures: Fixture[] = [];
     const logger = new Logger("silent");
     const record: RecordConfig = { providers: {} };
 
     // Create a mock req/res pair — we just need them to exist,
-    // proxyAndRecord should short-circuit before using them
+    // proxyAndRecord should return false before using them
     const { req, res } = createMockReqRes();
 
     const result = await proxyAndRecord(
@@ -129,10 +129,10 @@ describe("proxyAndRecord", () => {
       { record, logger },
     );
 
-    expect(result).toBe("not_configured");
+    expect(result).toBe(false);
   });
 
-  it('returns "not_configured" when record config is undefined', async () => {
+  it("returns false when record config is undefined", async () => {
     const fixtures: Fixture[] = [];
     const logger = new Logger("silent");
 
@@ -148,71 +148,7 @@ describe("proxyAndRecord", () => {
       { record: undefined, logger },
     );
 
-    expect(result).toBe("not_configured");
-  });
-
-  it("beforeWriteResponse hook receives raw upstream bytes (binary-safe)", async () => {
-    // Pins the refactor's claim that the hook sees raw upstream bytes, not a
-    // UTF-8-decoded-then-re-encoded view. Uses a deliberately non-UTF8 byte
-    // sequence so any round-trip through String() would corrupt it.
-    const bytes = Buffer.from([0xff, 0xfe, 0xfd, 0x00, 0x01, 0x02, 0x7f, 0x80]);
-
-    const binaryUpstream = http.createServer((_upReq, upRes) => {
-      upRes.writeHead(200, { "Content-Type": "application/octet-stream" });
-      upRes.end(bytes);
-    });
-    await new Promise<void>((resolve) => binaryUpstream.listen(0, "127.0.0.1", () => resolve()));
-    const upstreamPort = (binaryUpstream.address() as { port: number }).port;
-
-    let captured: ProxyCapturedResponse | undefined;
-
-    // Minimal HTTP server that invokes proxyAndRecord with our capture hook,
-    // so req/res are real and the full recorder pipeline exercises the hook.
-    const recorderServer = http.createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (c: Buffer) => chunks.push(c));
-      req.on("end", async () => {
-        const rawBody = Buffer.concat(chunks).toString();
-        await proxyAndRecord(
-          req,
-          res,
-          JSON.parse(rawBody),
-          "openai",
-          "/v1/chat/completions",
-          [],
-          {
-            record: {
-              providers: { openai: `http://127.0.0.1:${upstreamPort}` },
-              proxyOnly: true,
-            },
-            logger: new Logger("silent"),
-          },
-          rawBody,
-          {
-            beforeWriteResponse: (response) => {
-              captured = response;
-              return false; // let the default relay proceed; we only wanted to observe
-            },
-          },
-        );
-      });
-    });
-    await new Promise<void>((resolve) => recorderServer.listen(0, "127.0.0.1", () => resolve()));
-    const recorderPort = (recorderServer.address() as { port: number }).port;
-
-    try {
-      await post(`http://127.0.0.1:${recorderPort}/v1/chat/completions`, {
-        model: "gpt-4",
-        messages: [{ role: "user", content: "hi" }],
-      });
-
-      expect(captured).toBeDefined();
-      expect(captured!.body).toBeInstanceOf(Buffer);
-      expect(Buffer.compare(captured!.body, bytes)).toBe(0);
-    } finally {
-      await new Promise<void>((resolve) => binaryUpstream.close(() => resolve()));
-      await new Promise<void>((resolve) => recorderServer.close(() => resolve()));
-    }
+    expect(result).toBe(false);
   });
 });
 
@@ -2359,6 +2295,151 @@ describe("buildFixtureResponse format detection", () => {
       city: "SF",
     });
     expect(fixtureContent.fixtures[0].response.content).toBeUndefined();
+  });
+
+  it("detects Cohere v2 message-level tool_calls with text content", async () => {
+    const { url: upstreamUrl } = await createRawUpstreamWithStatus({
+      finish_reason: "TOOL_CALL",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Let me look that up." }],
+        tool_calls: [
+          {
+            name: "get_weather",
+            parameters: { city: "SF" },
+          },
+        ],
+      },
+    });
+
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-record-"));
+    recorder = await createServer([], {
+      port: 0,
+      record: { providers: { cohere: upstreamUrl }, fixturePath: tmpDir },
+    });
+
+    const resp = await post(`${recorder.url}/v2/chat`, {
+      model: "command-r-plus",
+      messages: [{ role: "user", content: "cohere v2 msg tool_calls with text" }],
+      stream: false,
+    });
+
+    expect(resp.status).toBe(200);
+
+    const files = fs.readdirSync(tmpDir);
+    const fixtureFiles = files.filter((f) => f.endsWith(".json"));
+    expect(fixtureFiles).toHaveLength(1);
+
+    const fixtureContent = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, fixtureFiles[0]), "utf-8"),
+    ) as {
+      fixtures: Array<{
+        response: {
+          content?: string;
+          toolCalls?: Array<{ name: string; arguments: string }>;
+        };
+      }>;
+    };
+    expect(fixtureContent.fixtures[0].response.content).toBe("Let me look that up.");
+    expect(fixtureContent.fixtures[0].response.toolCalls).toBeDefined();
+    expect(fixtureContent.fixtures[0].response.toolCalls).toHaveLength(1);
+    expect(fixtureContent.fixtures[0].response.toolCalls![0].name).toBe("get_weather");
+    expect(JSON.parse(fixtureContent.fixtures[0].response.toolCalls![0].arguments)).toEqual({
+      city: "SF",
+    });
+  });
+
+  it("detects Cohere v2 message-level tool_calls without text content", async () => {
+    const { url: upstreamUrl } = await createRawUpstreamWithStatus({
+      finish_reason: "TOOL_CALL",
+      message: {
+        role: "assistant",
+        content: [],
+        tool_calls: [
+          {
+            name: "search_docs",
+            parameters: { query: "aimock" },
+          },
+        ],
+      },
+    });
+
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-record-"));
+    recorder = await createServer([], {
+      port: 0,
+      record: { providers: { cohere: upstreamUrl }, fixturePath: tmpDir },
+    });
+
+    const resp = await post(`${recorder.url}/v2/chat`, {
+      model: "command-r-plus",
+      messages: [{ role: "user", content: "cohere v2 msg tool_calls only" }],
+      stream: false,
+    });
+
+    expect(resp.status).toBe(200);
+
+    const files = fs.readdirSync(tmpDir);
+    const fixtureFiles = files.filter((f) => f.endsWith(".json"));
+    expect(fixtureFiles).toHaveLength(1);
+
+    const fixtureContent = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, fixtureFiles[0]), "utf-8"),
+    ) as {
+      fixtures: Array<{
+        response: {
+          content?: string;
+          toolCalls?: Array<{ name: string; arguments: string }>;
+        };
+      }>;
+    };
+    expect(fixtureContent.fixtures[0].response.content).toBeUndefined();
+    expect(fixtureContent.fixtures[0].response.toolCalls).toBeDefined();
+    expect(fixtureContent.fixtures[0].response.toolCalls).toHaveLength(1);
+    expect(fixtureContent.fixtures[0].response.toolCalls![0].name).toBe("search_docs");
+    expect(JSON.parse(fixtureContent.fixtures[0].response.toolCalls![0].arguments)).toEqual({
+      query: "aimock",
+    });
+  });
+
+  it("detects Cohere v2 text-only response (no message-level tool_calls)", async () => {
+    const { url: upstreamUrl } = await createRawUpstreamWithStatus({
+      finish_reason: "COMPLETE",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Hello from Cohere" }],
+      },
+    });
+
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-record-"));
+    recorder = await createServer([], {
+      port: 0,
+      record: { providers: { cohere: upstreamUrl }, fixturePath: tmpDir },
+    });
+
+    const resp = await post(`${recorder.url}/v2/chat`, {
+      model: "command-r-plus",
+      messages: [{ role: "user", content: "cohere v2 text only" }],
+      stream: false,
+    });
+
+    expect(resp.status).toBe(200);
+
+    const files = fs.readdirSync(tmpDir);
+    const fixtureFiles = files.filter((f) => f.endsWith(".json"));
+    expect(fixtureFiles).toHaveLength(1);
+
+    const fixtureContent = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, fixtureFiles[0]), "utf-8"),
+    ) as {
+      fixtures: Array<{
+        response: {
+          content?: string;
+          toolCalls?: Array<{ name: string; arguments: string }>;
+        };
+      }>;
+    };
+    expect(fixtureContent.fixtures[0].response.content).toBe("Hello from Cohere");
+    expect(fixtureContent.fixtures[0].response.toolCalls).toBeUndefined();
   });
 
   it("unknown format falls back to error response", async () => {

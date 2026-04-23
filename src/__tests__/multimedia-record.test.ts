@@ -105,7 +105,7 @@ describe("multimedia record: image response detection", () => {
       };
 
       const { req, res } = createMockReqRes("/v1/images/generations");
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         request,
@@ -115,7 +115,7 @@ describe("multimedia record: image response detection", () => {
         { record, logger },
       );
 
-      expect(outcome).toBe("relayed");
+      expect(proxied).toBe(true);
       expect(fixtures).toHaveLength(1);
       const fixture = fixtures[0];
       expect(fixture.match.endpoint).toBe("image");

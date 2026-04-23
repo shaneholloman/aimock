@@ -37,61 +37,12 @@ const STRIP_HEADERS = new Set([
 ]);
 
 /**
- * Captured upstream response, exposed to the `beforeWriteResponse` hook so
- * callers can decide whether to relay it or mutate it (e.g. chaos injection).
- */
-export interface ProxyCapturedResponse {
-  status: number;
-  contentType: string;
-  body: Buffer;
-}
-
-export interface ProxyOptions {
-  /**
-   * Called after the upstream response has been captured and recorded, but
-   * before the relay to the client. Contract when the hook returns `true`:
-   *   1. It wrote its own response body on `res`.
-   *   2. It journaled the outcome (proxyAndRecord will NOT journal it).
-   *   3. proxyAndRecord skips its default relay and returns `"handled_by_hook"`.
-   *
-   * Returning `false` (or omitting the hook) lets proxyAndRecord relay the
-   * upstream response normally and leaves journaling to the caller via the
-   * `"relayed"` outcome. Rejected promises propagate and leave the response
-   * unwritten.
-   *
-   * NOT invoked when the upstream response was streamed progressively to the
-   * client (SSE) — the bytes are already on the wire and can't be mutated.
-   * Callers that need to observe the bypass should pass `onHookBypassed`.
-   */
-  beforeWriteResponse?: (response: ProxyCapturedResponse) => boolean | Promise<boolean>;
-  /**
-   * Called when `beforeWriteResponse` was provided but could not be invoked
-   * because the upstream response was streamed to the client progressively.
-   * The hook was rolled + wired but the bytes left before it could fire.
-   * Intended for observability (log/metric/journal annotation) — proxyAndRecord
-   * still returns `"relayed"`.
-   */
-  onHookBypassed?: (reason: "sse_streamed") => void;
-}
-
-/**
- * Outcome of a proxyAndRecord call, returned so the caller can decide whether
- * to journal, fall through, or stop — without sharing a mutable flag with the
- * `beforeWriteResponse` hook.
- *
- * - `"not_configured"` — no upstream URL for this provider; caller should fall
- *    through to its next branch (typically strict/404).
- * - `"relayed"` — the default code path wrote a response (upstream success or
- *    synthesized 502 error). Caller should journal the outcome.
- * - `"handled_by_hook"` — the hook wrote + journaled its own response. Caller
- *    should not double-journal.
- */
-export type ProxyOutcome = "not_configured" | "relayed" | "handled_by_hook";
-
-/**
  * Proxy an unmatched request to the real upstream provider, record the
  * response as a fixture on disk and in memory, then relay the response
  * back to the original client.
+ *
+ * Returns `true` if the request was proxied (provider configured),
+ * `false` if no upstream URL is configured for the given provider key.
  */
 export async function proxyAndRecord(
   req: http.IncomingMessage,
@@ -106,17 +57,16 @@ export async function proxyAndRecord(
     requestTransform?: (req: ChatCompletionRequest) => ChatCompletionRequest;
   },
   rawBody?: string,
-  options?: ProxyOptions,
-): Promise<ProxyOutcome> {
+): Promise<boolean> {
   const record = defaults.record;
-  if (!record) return "not_configured";
+  if (!record) return false;
 
   const providers = record.providers;
   const upstreamUrl = providers[providerKey];
 
   if (!upstreamUrl) {
     defaults.logger.warn(`No upstream URL configured for provider "${providerKey}" — cannot proxy`);
-    return "not_configured";
+    return false;
   }
 
   const fixturePath = record.fixturePath ?? "./fixtures/recorded";
@@ -132,7 +82,7 @@ export async function proxyAndRecord(
         error: { message: `Invalid upstream URL: ${upstreamUrl}`, type: "proxy_error" },
       }),
     );
-    return "relayed";
+    return true;
   }
 
   defaults.logger.warn(`NO FIXTURE MATCH — proxying to ${upstreamUrl}${pathname}`);
@@ -156,6 +106,7 @@ export async function proxyAndRecord(
   // Track whether we streamed SSE progressively to the client; if so,
   // skip the final res.writeHead/res.end relay at the bottom of this fn.
   let streamedToClient = false;
+  let clientDisconnected = false;
   try {
     const result = await makeUpstreamRequest(target, forwardHeaders, requestBody, res);
     upstreamStatus = result.status;
@@ -163,23 +114,25 @@ export async function proxyAndRecord(
     upstreamBody = result.body;
     rawBuffer = result.rawBuffer;
     streamedToClient = result.streamedToClient;
+    clientDisconnected = result.clientDisconnected;
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown proxy error";
     defaults.logger.error(`Proxy request failed: ${msg}`);
-    res.writeHead(502, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        error: { message: `Proxy to upstream failed: ${msg}`, type: "proxy_error" },
-      }),
-    );
-    return "relayed";
+    if (!res.headersSent) {
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: { message: `Proxy to upstream failed: ${msg}`, type: "proxy_error" },
+        }),
+      );
+    } else {
+      // SSE headers already sent — gracefully close the connection
+      res.end();
+    }
+    return true;
   }
 
-  // Detect streaming response and collapse if necessary.
-  // NOTE: collapse buffers the entire upstream body in memory. Fine for
-  // current chat-completions traffic (responses are small), but revisit if
-  // this path ever proxies long-lived or large streams — both the buffer
-  // here and the hook below receive the full payload.
+  // Detect streaming response and collapse if necessary
   const contentType = upstreamHeaders["content-type"];
   const ctString = Array.isArray(contentType) ? contentType.join(", ") : (contentType ?? "");
   const isBinaryStream = ctString.toLowerCase().includes("application/vnd.amazon.eventstream");
@@ -218,15 +171,20 @@ export async function proxyAndRecord(
     if (collapsed.content === "" && (!collapsed.toolCalls || collapsed.toolCalls.length === 0)) {
       defaults.logger.warn("Stream collapse produced empty content — fixture may be incomplete");
     }
+    const reasoningSpread = collapsed.reasoning ? { reasoning: collapsed.reasoning } : {};
     if (collapsed.toolCalls && collapsed.toolCalls.length > 0) {
       if (collapsed.content) {
-        defaults.logger.warn(
-          "Collapsed response has both content and toolCalls — preferring toolCalls",
-        );
+        // Both content and toolCalls present — save as ContentWithToolCallsResponse
+        fixtureResponse = {
+          content: collapsed.content,
+          toolCalls: collapsed.toolCalls,
+          ...reasoningSpread,
+        };
+      } else {
+        fixtureResponse = { toolCalls: collapsed.toolCalls, ...reasoningSpread };
       }
-      fixtureResponse = { toolCalls: collapsed.toolCalls };
     } else {
-      fixtureResponse = { content: collapsed.content ?? "" };
+      fixtureResponse = { content: collapsed.content ?? "", ...reasoningSpread };
     }
   } else {
     // Non-streaming — try to parse as JSON
@@ -240,10 +198,22 @@ export async function proxyAndRecord(
     let encodingFormat: string | undefined;
     try {
       encodingFormat = rawBody ? JSON.parse(rawBody).encoding_format : undefined;
-    } catch {
-      /* not JSON */
+    } catch (err) {
+      defaults.logger.debug(
+        `Could not parse encoding_format from raw body: ${err instanceof Error ? err.message : "unknown error"}`,
+      );
     }
     fixtureResponse = buildFixtureResponse(parsedResponse, upstreamStatus, encodingFormat);
+  }
+
+  // If the client disconnected mid-stream, the collected data is likely
+  // truncated.  Saving a partial fixture is worse than saving none — skip
+  // fixture persistence entirely.
+  if (clientDisconnected) {
+    defaults.logger.warn(
+      "Client disconnected mid-stream — skipping fixture save to avoid truncated data",
+    );
+    return true;
   }
 
   // Build the match criteria from the (optionally transformed) request
@@ -282,10 +252,7 @@ export async function proxyAndRecord(
         warnings.push("Stream response was truncated — fixture may be incomplete");
       }
 
-      // Auth headers are forwarded to upstream but excluded from saved fixtures for security.
-      // NOTE: the persisted fixture is always the real upstream response, even when chaos
-      // later mutates the relay (e.g. malformed via beforeWriteResponse). Chaos is a live-traffic
-      // decoration; the recorded artifact must stay truthful so replay sees what upstream said.
+      // Auth headers are forwarded to upstream but excluded from saved fixtures for security
       const fileContent: Record<string, unknown> = { fixtures: [fixture] };
       if (warnings.length > 0) {
         fileContent._warning = warnings.join("; ");
@@ -295,7 +262,11 @@ export async function proxyAndRecord(
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown filesystem error";
       defaults.logger.error(`Failed to save fixture to disk: ${msg}`);
-      res.setHeader("X-LLMock-Record-Error", msg);
+      if (!res.headersSent) {
+        res.setHeader("X-LLMock-Record-Error", msg);
+      } else {
+        defaults.logger.warn(`Cannot set X-LLMock-Record-Error header — headers already sent`);
+      }
     }
 
     if (writtenToDisk) {
@@ -314,35 +285,17 @@ export async function proxyAndRecord(
   // Relay upstream response to client (skip when SSE was already streamed
   // progressively by makeUpstreamRequest — headers and body are already on
   // the wire).
-  if (streamedToClient) {
-    // SSE: the hook can't run because the body is already on the wire. Surface
-    // the bypass so the caller (typically the chaos layer) can record it —
-    // otherwise a configured chaos action silently no-ops on SSE traffic.
-    if (options?.beforeWriteResponse && options.onHookBypassed) {
-      options.onHookBypassed("sse_streamed");
-    }
-  } else {
-    // Give the caller a chance to mutate or replace the response before relay.
-    // Used by the chaos layer to turn a successful proxy into a malformed body.
-    // `body` is the raw upstream bytes so binary payloads survive round-tripping.
-    if (options?.beforeWriteResponse) {
-      const handled = await options.beforeWriteResponse({
-        status: upstreamStatus,
-        contentType: ctString,
-        body: rawBuffer,
-      });
-      if (handled) return "handled_by_hook";
-    }
-
+  if (!streamedToClient) {
     const relayHeaders: Record<string, string> = {};
     if (ctString) {
       relayHeaders["Content-Type"] = ctString;
     }
     res.writeHead(upstreamStatus, relayHeaders);
-    res.end(isBinaryStream ? rawBuffer : upstreamBody);
+    const isAudioRelay = ctString.toLowerCase().startsWith("audio/");
+    res.end(isBinaryStream || isAudioRelay ? rawBuffer : upstreamBody);
   }
 
-  return "relayed";
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -360,6 +313,7 @@ function makeUpstreamRequest(
   body: string;
   rawBuffer: Buffer;
   streamedToClient: boolean;
+  clientDisconnected: boolean;
 }> {
   return new Promise((resolve, reject) => {
     const transport = target.protocol === "https:" ? https : http;
@@ -388,6 +342,7 @@ function makeUpstreamRequest(
         const ctStr = Array.isArray(ct) ? ct.join(", ") : (ct ?? "");
         const isSSE = ctStr.toLowerCase().includes("text/event-stream");
         let streamedToClient = false;
+        let clientDisconnected = false;
         if (isSSE && clientRes && !clientRes.headersSent) {
           const relayHeaders: Record<string, string> = {};
           if (ctStr) relayHeaders["Content-Type"] = ctStr;
@@ -396,22 +351,44 @@ function makeUpstreamRequest(
           // before the first data chunk arrives.
           if (typeof clientRes.flushHeaders === "function") clientRes.flushHeaders();
           streamedToClient = true;
+          // Stop relaying if the client disconnects mid-stream
+          clientRes.on("close", () => {
+            clientDisconnected = true;
+            req.destroy();
+          });
         }
         const chunks: Buffer[] = [];
         res.on("data", (chunk: Buffer) => {
           chunks.push(chunk);
-          if (streamedToClient) clientRes!.write(chunk);
+          if (
+            streamedToClient &&
+            clientRes &&
+            !clientDisconnected &&
+            !clientRes.destroyed &&
+            !clientRes.writableEnded
+          ) {
+            clientRes.write(chunk);
+          }
         });
         res.on("error", reject);
         res.on("end", () => {
           const rawBuffer = Buffer.concat(chunks);
-          if (streamedToClient) clientRes!.end();
+          if (
+            streamedToClient &&
+            clientRes &&
+            !clientDisconnected &&
+            !clientRes.destroyed &&
+            !clientRes.writableEnded
+          ) {
+            clientRes.end();
+          }
           resolve({
             status: res.statusCode ?? 500,
             headers: res.headers,
             body: rawBuffer.toString(),
             rawBuffer,
             streamedToClient,
+            clientDisconnected,
           });
         });
       },
@@ -448,8 +425,13 @@ function buildFixtureResponse(
 
   const obj = parsed as Record<string, unknown>;
 
-  // Error response
-  if (obj.error) {
+  // Error response — only match the actual { error: { message: "..." } } shape
+  // used by OpenAI/Anthropic/etc., not arbitrary truthy `.error` fields.
+  if (
+    typeof obj.error === "object" &&
+    obj.error !== null &&
+    typeof (obj.error as Record<string, unknown>).message === "string"
+  ) {
     const err = obj.error as Record<string, unknown>;
     return {
       error: {
@@ -468,13 +450,10 @@ function buildFixtureResponse(
       return { embedding: first.embedding as number[] };
     }
     if (typeof first.embedding === "string" && encodingFormat === "base64") {
-      try {
-        const buf = Buffer.from(first.embedding, "base64");
-        const floats = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
-        return { embedding: Array.from(floats) };
-      } catch {
-        // Corrupted base64 or non-float32 data — fall through to error
-      }
+      const buf = Buffer.from(first.embedding, "base64");
+      const aligned = new Uint8Array(buf).buffer; // Always offset 0
+      const floats = new Float32Array(aligned, 0, buf.byteLength / 4);
+      return { embedding: Array.from(floats) };
     }
     // OpenAI image generation: { created, data: [{ url, b64_json, revised_prompt }] }
     if (first.url || first.b64_json) {
@@ -519,10 +498,19 @@ function buildFixtureResponse(
   }
 
   // OpenAI video generation: { id, status, ... }
+  // Guard against false positives: many API responses have `id` + `status` fields
+  // (e.g. chat completions, Anthropic messages). Reject if the response has fields
+  // that indicate a known non-video format.
   if (
     typeof obj.id === "string" &&
     typeof obj.status === "string" &&
-    (obj.status === "completed" || obj.status === "in_progress" || obj.status === "failed")
+    (obj.status === "completed" || obj.status === "in_progress" || obj.status === "failed") &&
+    !("choices" in obj) &&
+    !("content" in obj) &&
+    !("candidates" in obj) &&
+    !("message" in obj) &&
+    !("data" in obj) &&
+    !("object" in obj)
   ) {
     if (obj.status === "completed" && obj.url) {
       return {
@@ -551,42 +539,84 @@ function buildFixtureResponse(
     const choice = obj.choices[0] as Record<string, unknown>;
     const message = choice.message as Record<string, unknown> | undefined;
     if (message) {
-      // Tool calls
-      if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+      const hasContent = typeof message.content === "string" && message.content.length > 0;
+
+      const openaiReasoning =
+        typeof message.reasoning_content === "string" && message.reasoning_content.length > 0
+          ? message.reasoning_content
+          : undefined;
+
+      if (hasToolCalls) {
         const toolCalls: ToolCall[] = (message.tool_calls as Array<Record<string, unknown>>).map(
           (tc) => {
             const fn = tc.function as Record<string, unknown>;
             return {
               name: String(fn.name),
               arguments: String(fn.arguments),
+              ...(tc.id ? { id: String(tc.id) } : {}),
             };
           },
         );
-        return { toolCalls };
+        if (hasContent) {
+          return {
+            content: message.content as string,
+            toolCalls,
+            ...(openaiReasoning ? { reasoning: openaiReasoning } : {}),
+          };
+        }
+        return { toolCalls, ...(openaiReasoning ? { reasoning: openaiReasoning } : {}) };
       }
-      // Text content
-      if (typeof message.content === "string") {
-        return { content: message.content };
+      // Text content only
+      if (hasContent) {
+        return {
+          content: message.content as string,
+          ...(openaiReasoning ? { reasoning: openaiReasoning } : {}),
+        };
       }
+      // Recognized OpenAI shape but empty content (e.g. content filtering, zero max_tokens)
+      return { content: "", ...(openaiReasoning ? { reasoning: openaiReasoning } : {}) };
     }
   }
 
   // Anthropic: { content: [{ type: "text", text: "..." }] } or tool_use
   if (Array.isArray(obj.content) && obj.content.length > 0) {
     const blocks = obj.content as Array<Record<string, unknown>>;
-    // Check for tool_use blocks first
     const toolUseBlocks = blocks.filter((b) => b.type === "tool_use");
-    if (toolUseBlocks.length > 0) {
+    const textBlocks = blocks.filter((b) => b.type === "text" && typeof b.text === "string");
+    const thinkingBlocks = blocks.filter((b) => b.type === "thinking");
+    const hasToolCalls = toolUseBlocks.length > 0;
+    const joinedText = textBlocks.map((b) => String(b.text ?? "")).join("");
+    const hasContent = joinedText.length > 0;
+    const anthropicReasoning =
+      thinkingBlocks.length > 0
+        ? thinkingBlocks.map((b) => String(b.thinking ?? "")).join("")
+        : undefined;
+
+    if (hasToolCalls) {
       const toolCalls: ToolCall[] = toolUseBlocks.map((b) => ({
         name: String(b.name),
         arguments: typeof b.input === "string" ? b.input : JSON.stringify(b.input),
+        ...(b.id ? { id: String(b.id) } : {}),
       }));
-      return { toolCalls };
+      if (hasContent) {
+        return {
+          content: joinedText,
+          toolCalls,
+          ...(anthropicReasoning ? { reasoning: anthropicReasoning } : {}),
+        };
+      }
+      return { toolCalls, ...(anthropicReasoning ? { reasoning: anthropicReasoning } : {}) };
     }
-    // Text blocks
-    const textBlock = blocks.find((b) => b.type === "text");
-    if (textBlock && typeof textBlock.text === "string") {
-      return { content: textBlock.text };
+    if (hasContent) {
+      return {
+        content: joinedText,
+        ...(anthropicReasoning ? { reasoning: anthropicReasoning } : {}),
+      };
+    }
+    // Thinking-only response (no text, no tool calls)
+    if (anthropicReasoning) {
+      return { content: "", reasoning: anthropicReasoning };
     }
   }
 
@@ -596,9 +626,18 @@ function buildFixtureResponse(
     const content = candidate.content as Record<string, unknown> | undefined;
     if (content && Array.isArray(content.parts)) {
       const parts = content.parts as Array<Record<string, unknown>>;
-      // Tool calls (functionCall)
       const fnCallParts = parts.filter((p) => p.functionCall);
-      if (fnCallParts.length > 0) {
+      const textParts = parts.filter((p) => typeof p.text === "string" && !p.thought);
+      const thoughtParts = parts.filter((p) => p.thought === true && typeof p.text === "string");
+      const hasToolCalls = fnCallParts.length > 0;
+      const joinedText = textParts.map((p) => String(p.text ?? "")).join("");
+      const hasContent = joinedText.length > 0;
+      const geminiReasoning =
+        thoughtParts.length > 0
+          ? thoughtParts.map((p) => String(p.text ?? "")).join("")
+          : undefined;
+
+      if (hasToolCalls) {
         const toolCalls: ToolCall[] = fnCallParts.map((p) => {
           const fc = p.functionCall as Record<string, unknown>;
           return {
@@ -606,13 +645,23 @@ function buildFixtureResponse(
             arguments: typeof fc.args === "string" ? fc.args : JSON.stringify(fc.args),
           };
         });
-        return { toolCalls };
+        if (hasContent) {
+          return {
+            content: joinedText,
+            toolCalls,
+            ...(geminiReasoning ? { reasoning: geminiReasoning } : {}),
+          };
+        }
+        return { toolCalls, ...(geminiReasoning ? { reasoning: geminiReasoning } : {}) };
       }
-      // Text
-      const textPart = parts.find((p) => typeof p.text === "string");
-      if (textPart && typeof textPart.text === "string") {
-        return { content: textPart.text };
+      if (hasContent) {
+        return {
+          content: joinedText,
+          ...(geminiReasoning ? { reasoning: geminiReasoning } : {}),
+        };
       }
+      // Recognized Gemini shape but empty content
+      return { content: "", ...(geminiReasoning ? { reasoning: geminiReasoning } : {}) };
     }
   }
 
@@ -623,28 +672,122 @@ function buildFixtureResponse(
     if (msg && Array.isArray(msg.content)) {
       const blocks = msg.content as Array<Record<string, unknown>>;
       const toolUseBlocks = blocks.filter((b) => b.toolUse);
-      if (toolUseBlocks.length > 0) {
+      const textBlocks = blocks.filter((b) => typeof b.text === "string");
+      const reasoningBlocks = blocks.filter((b) => b.reasoningContent);
+      const hasToolCalls = toolUseBlocks.length > 0;
+      const joinedText = textBlocks.map((b) => String(b.text ?? "")).join("");
+      const hasContent = joinedText.length > 0;
+      const bedrockReasoning =
+        reasoningBlocks.length > 0
+          ? reasoningBlocks
+              .map((b) => {
+                const rc = b.reasoningContent as Record<string, unknown>;
+                const rt = rc?.reasoningText as Record<string, unknown> | undefined;
+                return String(rt?.text ?? "");
+              })
+              .join("")
+          : undefined;
+
+      if (hasToolCalls) {
         const toolCalls: ToolCall[] = toolUseBlocks.map((b) => {
           const tu = b.toolUse as Record<string, unknown>;
           return {
             name: String(tu.name ?? ""),
             arguments: typeof tu.input === "string" ? tu.input : JSON.stringify(tu.input),
+            ...(tu.toolUseId ? { id: String(tu.toolUseId) } : {}),
           };
         });
-        return { toolCalls };
+        if (hasContent) {
+          return {
+            content: joinedText,
+            toolCalls,
+            ...(bedrockReasoning ? { reasoning: bedrockReasoning } : {}),
+          };
+        }
+        return { toolCalls, ...(bedrockReasoning ? { reasoning: bedrockReasoning } : {}) };
       }
-      const textBlock = blocks.find((b) => typeof b.text === "string");
-      if (textBlock && typeof textBlock.text === "string") {
-        return { content: textBlock.text };
+      if (hasContent) {
+        return {
+          content: joinedText,
+          ...(bedrockReasoning ? { reasoning: bedrockReasoning } : {}),
+        };
       }
+      // Recognized Bedrock Converse shape but empty content
+      return { content: "", ...(bedrockReasoning ? { reasoning: bedrockReasoning } : {}) };
+    }
+  }
+
+  // Cohere v2 chat: { finish_reason: "...", message: { content: [{ type: "text", text: "..." }] } }
+  // Must come before Ollama since both have `message`, but Cohere has `finish_reason` at top level
+  // (not nested in `choices`) and `message.content` as an array of typed objects.
+  if (
+    typeof obj.finish_reason === "string" &&
+    obj.message &&
+    typeof obj.message === "object" &&
+    Array.isArray((obj.message as Record<string, unknown>).content)
+  ) {
+    const msg = obj.message as Record<string, unknown>;
+    const contentBlocks = msg.content as Array<Record<string, unknown>>;
+    const textBlock = contentBlocks.find((b) => b.type === "text" && typeof b.text === "string");
+    const hasContent = textBlock && typeof textBlock.text === "string" && textBlock.text.length > 0;
+    const toolCallBlocks = contentBlocks.filter((b) => b.type === "tool_call");
+
+    // Also check message-level tool_calls (Cohere v2 puts tool calls here, not in content blocks)
+    const msgToolCalls = Array.isArray(msg.tool_calls)
+      ? (msg.tool_calls as Array<Record<string, unknown>>)
+      : [];
+
+    if (toolCallBlocks.length > 0) {
+      const toolCalls: ToolCall[] = toolCallBlocks.map((b) => ({
+        name: String(b.name ?? (b.function as Record<string, unknown>)?.name ?? ""),
+        arguments:
+          typeof b.parameters === "string"
+            ? b.parameters
+            : typeof b.parameters === "object"
+              ? JSON.stringify(b.parameters)
+              : typeof (b.function as Record<string, unknown>)?.arguments === "string"
+                ? String((b.function as Record<string, unknown>).arguments)
+                : JSON.stringify((b.function as Record<string, unknown>)?.arguments),
+        ...(b.id ? { id: String(b.id) } : {}),
+      }));
+      if (hasContent) {
+        return { content: textBlock.text as string, toolCalls };
+      }
+      return { toolCalls };
+    }
+    if (msgToolCalls.length > 0) {
+      const toolCalls: ToolCall[] = msgToolCalls.map((tc) => {
+        const fn = tc.function as Record<string, unknown> | undefined;
+        return {
+          name: String(tc.name ?? fn?.name ?? ""),
+          arguments:
+            typeof tc.parameters === "string"
+              ? tc.parameters
+              : typeof tc.parameters === "object"
+                ? JSON.stringify(tc.parameters)
+                : typeof fn?.arguments === "string"
+                  ? String(fn.arguments)
+                  : JSON.stringify(fn?.arguments),
+          ...(tc.id ? { id: String(tc.id) } : {}),
+        };
+      });
+      if (hasContent) {
+        return { content: textBlock.text as string, toolCalls };
+      }
+      return { toolCalls };
+    }
+    if (hasContent) {
+      return { content: textBlock.text as string };
     }
   }
 
   // Ollama: { message: { content: "...", tool_calls: [...] } }
   if (obj.message && typeof obj.message === "object") {
     const msg = obj.message as Record<string, unknown>;
-    // Tool calls (check before content — Ollama sends content: "" alongside tool_calls)
-    if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+    const hasOllamaToolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+    const hasOllamaContent = typeof msg.content === "string" && msg.content.length > 0;
+
+    if (hasOllamaToolCalls) {
       const toolCalls: ToolCall[] = (msg.tool_calls as Array<Record<string, unknown>>)
         .filter((tc) => tc.function != null)
         .map((tc) => {
@@ -655,10 +798,13 @@ function buildFixtureResponse(
               typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments),
           };
         });
+      if (hasOllamaContent) {
+        return { content: msg.content as string, toolCalls };
+      }
       return { toolCalls };
     }
-    if (typeof msg.content === "string" && msg.content.length > 0) {
-      return { content: msg.content };
+    if (hasOllamaContent) {
+      return { content: msg.content as string };
     }
     // Ollama message with content array (like Cohere)
     if (Array.isArray(msg.content) && msg.content.length > 0) {
@@ -667,6 +813,11 @@ function buildFixtureResponse(
         return { content: first.text };
       }
     }
+  }
+
+  // Ollama /api/generate: { response: "...", done: true/false }
+  if (typeof obj.response === "string" && "done" in obj) {
+    return { content: obj.response };
   }
 
   // Fallback: unknown format — save as error

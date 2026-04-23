@@ -15,6 +15,7 @@ import type {
   ChatMessage,
   Fixture,
   HandlerDefaults,
+  ResponseOverrides,
   StreamingProfile,
   ToolCall,
   ToolDefinition,
@@ -22,8 +23,10 @@ import type {
 import {
   generateMessageId,
   generateToolCallId,
+  extractOverrides,
   isTextResponse,
   isToolCallResponse,
+  isContentWithToolCallsResponse,
   isErrorResponse,
   flattenHeaders,
   getTestId,
@@ -38,10 +41,20 @@ import { proxyAndRecord } from "./recorder.js";
 
 // ─── Cohere v2 Chat request types ───────────────────────────────────────────
 
+interface CohereToolCallDef {
+  id?: string;
+  type: string;
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
 interface CohereMessage {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
   tool_call_id?: string;
+  tool_calls?: CohereToolCallDef[];
 }
 
 interface CohereToolDef {
@@ -75,6 +88,34 @@ const ZERO_USAGE = {
   tokens: { input_tokens: 0, output_tokens: 0 },
 };
 
+// ─── Cohere finish reason / usage mapping ──────────────────────────────────
+
+function cohereFinishReason(
+  overrideFinishReason: string | undefined,
+  defaultReason: string,
+): string {
+  if (!overrideFinishReason) return defaultReason;
+  if (overrideFinishReason === "stop") return "COMPLETE";
+  if (overrideFinishReason === "tool_calls") return "TOOL_CALL";
+  if (overrideFinishReason === "length") return "MAX_TOKENS";
+  return overrideFinishReason;
+}
+
+function cohereUsage(overrides?: ResponseOverrides): typeof ZERO_USAGE {
+  if (!overrides?.usage) return ZERO_USAGE;
+  const inputTokens = overrides.usage.input_tokens ?? overrides.usage.prompt_tokens ?? 0;
+  const outputTokens = overrides.usage.output_tokens ?? overrides.usage.completion_tokens ?? 0;
+  return {
+    billed_units: {
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      search_units: 0,
+      classifications: 0,
+    },
+    tokens: { input_tokens: inputTokens, output_tokens: outputTokens },
+  };
+}
+
 // ─── Input conversion: Cohere → ChatCompletionRequest ───────────────────────
 
 export function cohereToCompletionRequest(req: CohereRequest): ChatCompletionRequest {
@@ -86,7 +127,22 @@ export function cohereToCompletionRequest(req: CohereRequest): ChatCompletionReq
     } else if (msg.role === "user") {
       messages.push({ role: "user", content: msg.content });
     } else if (msg.role === "assistant") {
-      messages.push({ role: "assistant", content: msg.content });
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        messages.push({
+          role: "assistant",
+          content: msg.content || null,
+          tool_calls: msg.tool_calls.map((tc) => ({
+            id: tc.id ?? generateToolCallId(),
+            type: "function" as const,
+            function: {
+              name: tc.function.name,
+              arguments: tc.function.arguments,
+            },
+          })),
+        });
+      } else {
+        messages.push({ role: "assistant", content: msg.content });
+      }
     } else if (msg.role === "tool") {
       messages.push({
         role: "tool",
@@ -114,51 +170,69 @@ export function cohereToCompletionRequest(req: CohereRequest): ChatCompletionReq
     messages,
     stream: req.stream,
     tools,
+    ...(req.response_format && { response_format: req.response_format }),
   };
 }
 
 // ─── Response building: fixture → Cohere v2 Chat format ─────────────────────
 
 // Non-streaming text response
-function buildCohereTextResponse(content: string): object {
+function buildCohereTextResponse(
+  content: string,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
+): object {
+  const contentBlocks: { type: string; text: string }[] = [];
+  if (reasoning) {
+    contentBlocks.push({ type: "text", text: reasoning });
+  }
+  contentBlocks.push({ type: "text", text: content });
+
   return {
-    id: generateMessageId(),
-    finish_reason: "COMPLETE",
+    id: overrides?.id ?? generateMessageId(),
+    finish_reason: cohereFinishReason(overrides?.finishReason, "COMPLETE"),
     message: {
       role: "assistant",
-      content: [{ type: "text", text: content }],
+      content: contentBlocks,
       tool_calls: [],
       tool_plan: "",
       citations: [],
     },
-    usage: ZERO_USAGE,
+    usage: cohereUsage(overrides),
   };
 }
 
 // Non-streaming tool call response
-function buildCohereToolCallResponse(toolCalls: ToolCall[], logger: Logger): object {
+function buildCohereToolCallResponse(
+  toolCalls: ToolCall[],
+  logger: Logger,
+  overrides?: ResponseOverrides,
+): object {
   const cohereCalls = toolCalls.map((tc) => {
     // Validate arguments JSON
+    let argsJson: string;
     try {
       JSON.parse(tc.arguments || "{}");
+      argsJson = tc.arguments || "{}";
     } catch {
       logger.warn(
         `Malformed JSON in fixture tool call arguments for "${tc.name}": ${tc.arguments}`,
       );
+      argsJson = "{}";
     }
     return {
       id: tc.id || generateToolCallId(),
       type: "function",
       function: {
         name: tc.name,
-        arguments: tc.arguments || "{}",
+        arguments: argsJson,
       },
     };
   });
 
   return {
-    id: generateMessageId(),
-    finish_reason: "TOOL_CALL",
+    id: overrides?.id ?? generateMessageId(),
+    finish_reason: cohereFinishReason(overrides?.finishReason, "TOOL_CALL"),
     message: {
       role: "assistant",
       content: [],
@@ -166,14 +240,68 @@ function buildCohereToolCallResponse(toolCalls: ToolCall[], logger: Logger): obj
       tool_plan: "",
       citations: [],
     },
-    usage: ZERO_USAGE,
+    usage: cohereUsage(overrides),
+  };
+}
+
+// Non-streaming content + tool calls response
+function buildCohereContentWithToolCallsResponse(
+  content: string,
+  toolCalls: ToolCall[],
+  logger: Logger,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
+): object {
+  const cohereCalls = toolCalls.map((tc) => {
+    let argsJson: string;
+    try {
+      JSON.parse(tc.arguments || "{}");
+      argsJson = tc.arguments || "{}";
+    } catch {
+      logger.warn(
+        `Malformed JSON in fixture tool call arguments for "${tc.name}": ${tc.arguments}`,
+      );
+      argsJson = "{}";
+    }
+    return {
+      id: tc.id || generateToolCallId(),
+      type: "function",
+      function: {
+        name: tc.name,
+        arguments: argsJson,
+      },
+    };
+  });
+
+  const contentBlocks: { type: string; text: string }[] = [];
+  if (reasoning) {
+    contentBlocks.push({ type: "text", text: reasoning });
+  }
+  contentBlocks.push({ type: "text", text: content });
+
+  return {
+    id: overrides?.id ?? generateMessageId(),
+    finish_reason: cohereFinishReason(overrides?.finishReason, "TOOL_CALL"),
+    message: {
+      role: "assistant",
+      content: contentBlocks,
+      tool_calls: cohereCalls,
+      tool_plan: "",
+      citations: [],
+    },
+    usage: cohereUsage(overrides),
   };
 }
 
 // ─── Streaming event builders ───────────────────────────────────────────────
 
-function buildCohereTextStreamEvents(content: string, chunkSize: number): CohereSSEEvent[] {
-  const msgId = generateMessageId();
+function buildCohereTextStreamEvents(
+  content: string,
+  chunkSize: number,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
+): CohereSSEEvent[] {
+  const msgId = overrides?.id ?? generateMessageId();
   const events: CohereSSEEvent[] = [];
 
   // message-start
@@ -191,10 +319,31 @@ function buildCohereTextStreamEvents(content: string, chunkSize: number): Cohere
     },
   });
 
+  let contentIndex = 0;
+
+  // Reasoning as a text block before main content (Cohere has no native reasoning type)
+  if (reasoning) {
+    events.push({
+      type: "content-start",
+      index: contentIndex,
+      delta: { message: { content: { type: "text" } } },
+    });
+    for (let i = 0; i < reasoning.length; i += chunkSize) {
+      const slice = reasoning.slice(i, i + chunkSize);
+      events.push({
+        type: "content-delta",
+        index: contentIndex,
+        delta: { message: { content: { type: "text", text: slice } } },
+      });
+    }
+    events.push({ type: "content-end", index: contentIndex });
+    contentIndex++;
+  }
+
   // content-start (type: "text" only, no text field)
   events.push({
     type: "content-start",
-    index: 0,
+    index: contentIndex,
     delta: {
       message: {
         content: { type: "text" },
@@ -207,7 +356,7 @@ function buildCohereTextStreamEvents(content: string, chunkSize: number): Cohere
     const slice = content.slice(i, i + chunkSize);
     events.push({
       type: "content-delta",
-      index: 0,
+      index: contentIndex,
       delta: {
         message: {
           content: { type: "text", text: slice },
@@ -219,15 +368,15 @@ function buildCohereTextStreamEvents(content: string, chunkSize: number): Cohere
   // content-end
   events.push({
     type: "content-end",
-    index: 0,
+    index: contentIndex,
   });
 
   // message-end
   events.push({
     type: "message-end",
     delta: {
-      finish_reason: "COMPLETE",
-      usage: ZERO_USAGE,
+      finish_reason: cohereFinishReason(overrides?.finishReason, "COMPLETE"),
+      usage: cohereUsage(overrides),
     },
   });
 
@@ -238,8 +387,9 @@ function buildCohereToolCallStreamEvents(
   toolCalls: ToolCall[],
   chunkSize: number,
   logger: Logger,
+  overrides?: ResponseOverrides,
 ): CohereSSEEvent[] {
-  const msgId = generateMessageId();
+  const msgId = overrides?.id ?? generateMessageId();
   const events: CohereSSEEvent[] = [];
 
   // message-start
@@ -330,8 +480,167 @@ function buildCohereToolCallStreamEvents(
   events.push({
     type: "message-end",
     delta: {
-      finish_reason: "TOOL_CALL",
-      usage: ZERO_USAGE,
+      finish_reason: cohereFinishReason(overrides?.finishReason, "TOOL_CALL"),
+      usage: cohereUsage(overrides),
+    },
+  });
+
+  return events;
+}
+
+function buildCohereContentWithToolCallsStreamEvents(
+  content: string,
+  toolCalls: ToolCall[],
+  chunkSize: number,
+  logger: Logger,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
+): CohereSSEEvent[] {
+  const msgId = overrides?.id ?? generateMessageId();
+  const events: CohereSSEEvent[] = [];
+
+  // message-start
+  events.push({
+    id: msgId,
+    type: "message-start",
+    delta: {
+      message: {
+        role: "assistant",
+        content: [],
+        tool_plan: "",
+        tool_calls: [],
+        citations: [],
+      },
+    },
+  });
+
+  let contentIndex = 0;
+
+  // Reasoning as a text block before main content
+  if (reasoning) {
+    events.push({
+      type: "content-start",
+      index: contentIndex,
+      delta: { message: { content: { type: "text" } } },
+    });
+    for (let i = 0; i < reasoning.length; i += chunkSize) {
+      const slice = reasoning.slice(i, i + chunkSize);
+      events.push({
+        type: "content-delta",
+        index: contentIndex,
+        delta: { message: { content: { type: "text", text: slice } } },
+      });
+    }
+    events.push({ type: "content-end", index: contentIndex });
+    contentIndex++;
+  }
+
+  // content-start (type: "text" only, no text field)
+  events.push({
+    type: "content-start",
+    index: contentIndex,
+    delta: {
+      message: {
+        content: { type: "text" },
+      },
+    },
+  });
+
+  // content-delta — text chunks
+  for (let i = 0; i < content.length; i += chunkSize) {
+    const slice = content.slice(i, i + chunkSize);
+    events.push({
+      type: "content-delta",
+      index: contentIndex,
+      delta: {
+        message: {
+          content: { type: "text", text: slice },
+        },
+      },
+    });
+  }
+
+  // content-end
+  events.push({
+    type: "content-end",
+    index: contentIndex,
+  });
+
+  // tool-plan-delta
+  events.push({
+    type: "tool-plan-delta",
+    delta: {
+      message: {
+        tool_plan: "I will use the requested tool.",
+      },
+    },
+  });
+
+  // Tool call events
+  for (let idx = 0; idx < toolCalls.length; idx++) {
+    const tc = toolCalls[idx];
+    const callId = tc.id || generateToolCallId();
+
+    let argsJson: string;
+    try {
+      JSON.parse(tc.arguments || "{}");
+      argsJson = tc.arguments || "{}";
+    } catch {
+      logger.warn(
+        `Malformed JSON in fixture tool call arguments for "${tc.name}": ${tc.arguments}`,
+      );
+      argsJson = "{}";
+    }
+
+    // tool-call-start
+    events.push({
+      type: "tool-call-start",
+      index: idx,
+      delta: {
+        message: {
+          tool_calls: {
+            id: callId,
+            type: "function",
+            function: {
+              name: tc.name,
+              arguments: "",
+            },
+          },
+        },
+      },
+    });
+
+    // tool-call-delta — chunked arguments
+    for (let i = 0; i < argsJson.length; i += chunkSize) {
+      const slice = argsJson.slice(i, i + chunkSize);
+      events.push({
+        type: "tool-call-delta",
+        index: idx,
+        delta: {
+          message: {
+            tool_calls: {
+              function: {
+                arguments: slice,
+              },
+            },
+          },
+        },
+      });
+    }
+
+    // tool-call-end
+    events.push({
+      type: "tool-call-end",
+      index: idx,
+    });
+  }
+
+  // message-end
+  events.push({
+    type: "message-end",
+    delta: {
+      finish_reason: cohereFinishReason(overrides?.finishReason, "TOOL_CALL"),
+      usage: cohereUsage(overrides),
     },
   });
 
@@ -492,7 +801,6 @@ export async function handleCohere(
         headers: flattenHeaders(req.headers),
         body: completionReq,
       },
-      fixture ? "fixture" : "proxy",
       defaults.registry,
       defaults.logger,
     )
@@ -501,7 +809,7 @@ export async function handleCohere(
 
   if (!fixture) {
     if (defaults.record) {
-      const outcome = await proxyAndRecord(
+      const proxied = await proxyAndRecord(
         req,
         res,
         completionReq,
@@ -511,13 +819,13 @@ export async function handleCohere(
         defaults,
         raw,
       );
-      if (outcome !== "not_configured") {
+      if (proxied) {
         journal.add({
           method: req.method ?? "POST",
           path: req.url ?? "/v2/chat",
           headers: flattenHeaders(req.headers),
           body: completionReq,
-          response: { status: res.statusCode ?? 200, fixture: null },
+          response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
         return;
       }
@@ -569,8 +877,14 @@ export async function handleCohere(
     return;
   }
 
-  // Text response
-  if (isTextResponse(response)) {
+  // Content + tool calls response (must be checked before text/tool-only branches)
+  if (isContentWithToolCallsResponse(response)) {
+    if (response.webSearches?.length) {
+      logger.warn(
+        "webSearches in fixture response are not supported for Cohere v2 Chat API — ignoring",
+      );
+    }
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? "/v2/chat",
@@ -579,11 +893,67 @@ export async function handleCohere(
       response: { status: 200, fixture },
     });
     if (cohereReq.stream !== true) {
-      const body = buildCohereTextResponse(response.content);
+      const body = buildCohereContentWithToolCallsResponse(
+        response.content,
+        response.toolCalls,
+        logger,
+        response.reasoning,
+        overrides,
+      );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     } else {
-      const events = buildCohereTextStreamEvents(response.content, chunkSize);
+      const events = buildCohereContentWithToolCallsStreamEvents(
+        response.content,
+        response.toolCalls,
+        chunkSize,
+        logger,
+        response.reasoning,
+        overrides,
+      );
+      const interruption = createInterruptionSignal(fixture);
+      const completed = await writeCohereSSEStream(res, events, {
+        latency,
+        streamingProfile: fixture.streamingProfile,
+        signal: interruption?.signal,
+        onChunkSent: interruption?.tick,
+      });
+      if (!completed) {
+        if (!res.writableEnded) res.destroy();
+        journalEntry.response.interrupted = true;
+        journalEntry.response.interruptReason = interruption?.reason();
+      }
+      interruption?.cleanup();
+    }
+    return;
+  }
+
+  // Text response
+  if (isTextResponse(response)) {
+    if (response.webSearches?.length) {
+      logger.warn(
+        "webSearches in fixture response are not supported for Cohere v2 Chat API — ignoring",
+      );
+    }
+    const overrides = extractOverrides(response);
+    const journalEntry = journal.add({
+      method: req.method ?? "POST",
+      path: req.url ?? "/v2/chat",
+      headers: flattenHeaders(req.headers),
+      body: completionReq,
+      response: { status: 200, fixture },
+    });
+    if (cohereReq.stream !== true) {
+      const body = buildCohereTextResponse(response.content, response.reasoning, overrides);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    } else {
+      const events = buildCohereTextStreamEvents(
+        response.content,
+        chunkSize,
+        response.reasoning,
+        overrides,
+      );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeCohereSSEStream(res, events, {
         latency,
@@ -603,6 +973,7 @@ export async function handleCohere(
 
   // Tool call response
   if (isToolCallResponse(response)) {
+    const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
       path: req.url ?? "/v2/chat",
@@ -611,11 +982,16 @@ export async function handleCohere(
       response: { status: 200, fixture },
     });
     if (cohereReq.stream !== true) {
-      const body = buildCohereToolCallResponse(response.toolCalls, logger);
+      const body = buildCohereToolCallResponse(response.toolCalls, logger, overrides);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     } else {
-      const events = buildCohereToolCallStreamEvents(response.toolCalls, chunkSize, logger);
+      const events = buildCohereToolCallStreamEvents(
+        response.toolCalls,
+        chunkSize,
+        logger,
+        overrides,
+      );
       const interruption = createInterruptionSignal(fixture);
       const completed = await writeCohereSSEStream(res, events, {
         latency,
