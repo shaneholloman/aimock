@@ -67,7 +67,11 @@ export function matchFixture(
       if (!compatible) continue;
     }
 
-    // userMessage — match against the last user message content
+    // userMessage — case-sensitive match against the last user message content.
+    // String matching is intentionally case-sensitive so fixture authors can
+    // rely on exact string values. This differs from the case-insensitive
+    // matchesPattern() in helpers.ts, which is used for search/rerank/moderation
+    // where exact casing rarely matters.
     if (match.userMessage !== undefined) {
       const msg = getLastMessageByRole(effective.messages, "user");
       const text = msg ? getTextContent(msg.content) : null;
@@ -79,6 +83,7 @@ export function matchFixture(
           if (!text.includes(match.userMessage)) continue;
         }
       } else {
+        match.userMessage.lastIndex = 0;
         if (!match.userMessage.test(text)) continue;
       }
     }
@@ -96,7 +101,8 @@ export function matchFixture(
       if (!found) continue;
     }
 
-    // inputText — match against the embedding input text (used by embeddings endpoint)
+    // inputText — case-sensitive match against the embedding input text.
+    // Same rationale as userMessage above: fixture authors specify exact strings.
     if (match.inputText !== undefined) {
       const embeddingInput = effective.embeddingInput;
       if (!embeddingInput) continue;
@@ -107,6 +113,7 @@ export function matchFixture(
           if (!embeddingInput.includes(match.inputText)) continue;
         }
       } else {
+        match.inputText.lastIndex = 0;
         if (!match.inputText.test(embeddingInput)) continue;
       }
     }
@@ -122,6 +129,7 @@ export function matchFixture(
       if (typeof match.model === "string") {
         if (effective.model !== match.model) continue;
       } else {
+        match.model.lastIndex = 0;
         if (!match.model.test(effective.model)) continue;
       }
     }
