@@ -1,5 +1,21 @@
 # @copilotkit/aimock
 
+## [1.16.2] - 2026-04-28
+
+### Fixed
+
+- **Bedrock invoke native stream format** — `invoke-with-response-stream` now emits Anthropic-native snake_case payloads (`content_block_delta`, `input_json_delta`) wrapped in Bedrock EventStream `chunk` frames, instead of Converse-style camelCase events. Converse-stream retains camelCase format. (PR #144, sf-jin-ku)
+- **Bedrock invoke false-green test** — Reasoning negative test used wrong event filters, masking a real bug; corrected to match actual stream shape (PR #144)
+- **Bedrock invoke/stream hardening** — Set `completionReq.stream = true` in streaming handler; use deterministic `tool_use_${index}` fallback IDs; change `textContent || null` to `?? null` to preserve empty strings; warn on unsupported content block types and unexpected roles; add webSearches warning on tool-call-only responses
+- **Converse stream shape alignment** — Wrap `contentBlockStop` and `messageStop` payloads to match real AWS Converse API; remove duplicate top-level `contentBlockIndex` from `contentBlockStart`/`contentBlockDelta`; add trailing `metadata` events (usage + latencyMs) to all stream builders
+- **Converse request conversion** — Filter empty-string text blocks in all paths; unwrap `inputSchema` from `{ json: {...} }` Converse API wrapper; set `completionReq.stream = true` in streaming handler; add content-loss warnings for non-text blocks; fix error type `||` to `??`
+
+### Changed
+
+- Extract shared test helpers (`createMockReq`/`createMockRes`/`createDefaults`) into `helpers/mock-res.ts`
+- Convert reasoning-all-providers tests to per-test server lifecycle
+- Add content+toolCalls streaming integration coverage for both invoke and converse paths (PR #144)
+
 ## [1.16.1] - 2026-04-28
 
 ### Fixed
