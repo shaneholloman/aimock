@@ -19,24 +19,49 @@ aimock is a zero-dependency mock infrastructure for AI apps. Fixture-driven. Mul
 
 ## Match Field Reference
 
-| Field            | Type                                      | Matches Against                                                                                         |
-| ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `userMessage`    | `string`                                  | Substring of last `role: "user"` message text                                                           |
-| `userMessage`    | `RegExp`                                  | Pattern test on last `role: "user"` message text                                                        |
-| `inputText`      | `string`                                  | Substring of embedding input text (concatenated if multiple inputs)                                     |
-| `inputText`      | `RegExp`                                  | Pattern test on embedding input text                                                                    |
-| `toolName`       | `string`                                  | Exact match on any tool in request's `tools[]` array (by `function.name`)                               |
-| `toolCallId`     | `string`                                  | Exact match on `tool_call_id` of last `role: "tool"` message                                            |
-| `model`          | `string`                                  | Exact match on `req.model`                                                                              |
-| `model`          | `RegExp`                                  | Pattern test on `req.model`                                                                             |
-| `responseFormat` | `string`                                  | Exact match on `req.response_format.type` (`"json_object"`, `"json_schema"`)                            |
-| `sequenceIndex`  | `number`                                  | Matches only when this fixture's match count equals the given index (0-based)                           |
-| `endpoint`       | `string`                                  | Restrict to endpoint type: `"chat"`, `"image"`, `"speech"`, `"transcription"`, `"video"`, `"embedding"` |
-| `predicate`      | `(req: ChatCompletionRequest) => boolean` | Custom function — full access to request                                                                |
+| Field            | Type                                      | Matches Against                                                                                                                                                                                                                                                                                              |
+| ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `userMessage`    | `string`                                  | Substring of last `role: "user"` message text                                                                                                                                                                                                                                                                |
+| `userMessage`    | `RegExp`                                  | Pattern test on last `role: "user"` message text                                                                                                                                                                                                                                                             |
+| `inputText`      | `string`                                  | Substring of embedding input text (concatenated if multiple inputs)                                                                                                                                                                                                                                          |
+| `inputText`      | `RegExp`                                  | Pattern test on embedding input text                                                                                                                                                                                                                                                                         |
+| `toolName`       | `string`                                  | Exact match on any tool in request's `tools[]` array (by `function.name`)                                                                                                                                                                                                                                    |
+| `toolCallId`     | `string`                                  | Exact match on `tool_call_id` of last `role: "tool"` message                                                                                                                                                                                                                                                 |
+| `model`          | `string`                                  | Exact match on `req.model`                                                                                                                                                                                                                                                                                   |
+| `model`          | `RegExp`                                  | Pattern test on `req.model`                                                                                                                                                                                                                                                                                  |
+| `responseFormat` | `string`                                  | Exact match on `req.response_format.type` (`"json_object"`, `"json_schema"`)                                                                                                                                                                                                                                 |
+| `sequenceIndex`  | `number`                                  | Matches only when this fixture's match count equals the given index (0-based)                                                                                                                                                                                                                                |
+| `turnIndex`      | `number`                                  | Stateless conversation-depth matching. Counts `role: "assistant"` messages in the request; matches when that count equals the value. `turnIndex: 0` = first turn (no prior assistant messages). Use instead of `sequenceIndex` for shared/deployed instances where stateful counters break under concurrency |
+| `hasToolResult`  | `boolean`                                 | Stateless tool-message presence matching. `true` matches when any `role: "tool"` message exists in the request; `false` matches when none exist. Provider-consistent across all aimock handlers (OpenAI, Claude, Gemini, Bedrock, Ollama, Cohere)                                                            |
+| `endpoint`       | `string`                                  | Restrict to endpoint type: `"chat"`, `"image"`, `"speech"`, `"transcription"`, `"video"`, `"embedding"`                                                                                                                                                                                                      |
+| `predicate`      | `(req: ChatCompletionRequest) => boolean` | Custom function — full access to request                                                                                                                                                                                                                                                                     |
 
 **AND logic**: all specified fields must match. Empty match `{}` = catch-all.
 
 Multi-part content (e.g., `[{type: "text", text: "hello"}]`) is automatically extracted — `userMessage` matching works regardless of content format.
+
+### When to Use Each Multi-turn Matching Approach
+
+| Approach        | Stateless? | Best For                                                                                                  |
+| --------------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| `turnIndex`     | Yes        | Shared/deployed instances; matches on conversation depth (count of assistant messages in request)         |
+| `hasToolResult` | Yes        | Simplest option for 2-step tool flows — boolean: are there tool results in the request?                   |
+| `sequenceIndex` | No         | Single-client unit tests with repeated identical requests (server-side counter, breaks under concurrency) |
+| `toolCallId`    | Yes        | Matching specific tool result IDs in the conversation history                                             |
+
+**Prefer stateless approaches** (`turnIndex`, `hasToolResult`) for shared aimock instances (deployed via Docker, used by multiple test runners). Use `sequenceIndex` only in isolated single-client unit tests where the counter won't be corrupted by concurrent requests.
+
+### Multi-turn fixture examples
+
+```jsonc
+// 2-step HITL with turnIndex
+{"match": {"userMessage": "trip to mars", "turnIndex": 0}, "response": {"toolCalls": [{"id": "call_001", "name": "generate_steps", "arguments": "{}"}]}}
+{"match": {"userMessage": "trip to mars", "turnIndex": 1}, "response": {"content": "Great choices! Proceeding."}}
+
+// Same thing with hasToolResult (simpler for 2-step)
+{"match": {"userMessage": "trip to mars", "hasToolResult": false}, "response": {"toolCalls": [{"id": "call_001", "name": "generate_steps", "arguments": "{}"}]}}
+{"match": {"userMessage": "trip to mars", "hasToolResult": true}, "response": {"content": "Great choices!"}}
+```
 
 ## Response Types
 
@@ -653,41 +678,42 @@ const mock = await LLMock.create({ port: 0 }); // creates + starts in one call
 
 ## API Quick Reference
 
-| Method                                  | Purpose                                     |
-| --------------------------------------- | ------------------------------------------- |
-| `addFixture(f)`                         | Append fixture (last priority)              |
-| `addFixtures(f[])`                      | Append multiple                             |
-| `prependFixture(f)`                     | Insert at front (highest priority)          |
-| `clearFixtures()`                       | Remove all fixtures                         |
-| `getFixtures()`                         | Read current fixture list                   |
-| `on(match, response, opts?)`            | Shorthand for `addFixture`                  |
-| `onMessage(pattern, response, opts?)`   | Match by user message                       |
-| `onEmbedding(pattern, response, opts?)` | Match by embedding input text               |
-| `onJsonOutput(pattern, json, opts?)`    | Match by user message with `responseFormat` |
-| `onToolCall(name, response, opts?)`     | Match by tool name in `tools[]`             |
-| `onToolResult(id, response, opts?)`     | Match by `tool_call_id`                     |
-| `nextRequestError(status, body?)`       | One-shot error, auto-removes                |
-| `loadFixtureFile(path)`                 | Load JSON fixture file                      |
-| `loadFixtureDir(path)`                  | Load all JSON files in directory            |
-| `start()`                               | Start server, returns URL                   |
-| `stop()`                                | Stop server                                 |
-| `reset()`                               | Clear fixtures + journal + match counts     |
-| `resetMatchCounts()`                    | Clear sequence match counts only            |
-| `getRequests()`                         | All journal entries                         |
-| `getLastRequest()`                      | Most recent journal entry                   |
-| `clearRequests()`                       | Clear journal only                          |
-| `setChaos(opts)`                        | Set server-level chaos rates                |
-| `clearChaos()`                          | Remove server-level chaos                   |
-| `onSearch(pattern, results)`            | Match search requests by query              |
-| `onRerank(pattern, results)`            | Match rerank requests by query              |
-| `onModerate(pattern, result)`           | Match moderation requests by input          |
-| `onImage(pattern, response)`            | Match image generation by prompt            |
-| `onSpeech(pattern, response)`           | Match TTS by input text                     |
-| `onTranscription(response)`             | Match audio transcription                   |
-| `onVideo(pattern, response)`            | Match video generation by prompt            |
-| `mount(path, handler)`                  | Mount a Mountable (VectorMock, etc.)        |
-| `url` / `baseUrl`                       | Server URL (throws if not started)          |
-| `port`                                  | Server port number                          |
+| Method                                   | Purpose                                     |
+| ---------------------------------------- | ------------------------------------------- |
+| `addFixture(f)`                          | Append fixture (last priority)              |
+| `addFixtures(f[])`                       | Append multiple                             |
+| `prependFixture(f)`                      | Insert at front (highest priority)          |
+| `clearFixtures()`                        | Remove all fixtures                         |
+| `getFixtures()`                          | Read current fixture list                   |
+| `on(match, response, opts?)`             | Shorthand for `addFixture`                  |
+| `onMessage(pattern, response, opts?)`    | Match by user message                       |
+| `onEmbedding(pattern, response, opts?)`  | Match by embedding input text               |
+| `onJsonOutput(pattern, json, opts?)`     | Match by user message with `responseFormat` |
+| `onToolCall(name, response, opts?)`      | Match by tool name in `tools[]`             |
+| `onToolResult(id, response, opts?)`      | Match by `tool_call_id`                     |
+| `onTurn(turn, pattern, response, opts?)` | Match by turn index + user message          |
+| `nextRequestError(status, body?)`        | One-shot error, auto-removes                |
+| `loadFixtureFile(path)`                  | Load JSON fixture file                      |
+| `loadFixtureDir(path)`                   | Load all JSON files in directory            |
+| `start()`                                | Start server, returns URL                   |
+| `stop()`                                 | Stop server                                 |
+| `reset()`                                | Clear fixtures + journal + match counts     |
+| `resetMatchCounts()`                     | Clear sequence match counts only            |
+| `getRequests()`                          | All journal entries                         |
+| `getLastRequest()`                       | Most recent journal entry                   |
+| `clearRequests()`                        | Clear journal only                          |
+| `setChaos(opts)`                         | Set server-level chaos rates                |
+| `clearChaos()`                           | Remove server-level chaos                   |
+| `onSearch(pattern, results)`             | Match search requests by query              |
+| `onRerank(pattern, results)`             | Match rerank requests by query              |
+| `onModerate(pattern, result)`            | Match moderation requests by input          |
+| `onImage(pattern, response)`             | Match image generation by prompt            |
+| `onSpeech(pattern, response)`            | Match TTS by input text                     |
+| `onTranscription(response)`              | Match audio transcription                   |
+| `onVideo(pattern, response)`             | Match video generation by prompt            |
+| `mount(path, handler)`                   | Mount a Mountable (VectorMock, etc.)        |
+| `url` / `baseUrl`                        | Server URL (throws if not started)          |
+| `port`                                   | Server port number                          |
 
 Sequential responses use `on()` with `sequenceIndex` in the match — there is no dedicated convenience method.
 
