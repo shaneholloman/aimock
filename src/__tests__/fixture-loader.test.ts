@@ -800,12 +800,119 @@ describe("validateFixtures", () => {
     expect(validateFixtures(fixtures)).toHaveLength(0);
   });
 
+  // --- match.turnIndex / match.hasToolResult type checks ---
+
+  it("error: turnIndex is negative", () => {
+    const fixtures = [makeFixture({ match: { userMessage: "test", turnIndex: -1 } })];
+    const results = validateFixtures(fixtures);
+    expect(results.some((r) => r.severity === "error" && r.message.includes("turnIndex"))).toBe(
+      true,
+    );
+  });
+
+  it("error: turnIndex is a float", () => {
+    const fixtures = [makeFixture({ match: { userMessage: "test", turnIndex: 1.5 } })];
+    const results = validateFixtures(fixtures);
+    expect(results.some((r) => r.severity === "error" && r.message.includes("turnIndex"))).toBe(
+      true,
+    );
+  });
+
+  it("error: turnIndex is a string", () => {
+    const fixtures = [makeFixture({ match: { userMessage: "test", turnIndex: "zero" as never } })];
+    const results = validateFixtures(fixtures);
+    expect(results.some((r) => r.severity === "error" && r.message.includes("turnIndex"))).toBe(
+      true,
+    );
+  });
+
+  it("no error: turnIndex is 0 (falsy but valid)", () => {
+    const fixtures = [makeFixture({ match: { userMessage: "test", turnIndex: 0 } })];
+    const results = validateFixtures(fixtures);
+    expect(results.filter((r) => r.message.includes("turnIndex"))).toHaveLength(0);
+  });
+
+  it("no error: turnIndex is a positive integer", () => {
+    const fixtures = [makeFixture({ match: { userMessage: "test", turnIndex: 3 } })];
+    const results = validateFixtures(fixtures);
+    expect(results.filter((r) => r.message.includes("turnIndex"))).toHaveLength(0);
+  });
+
+  it("error: hasToolResult is a string", () => {
+    const fixtures = [
+      makeFixture({ match: { userMessage: "test", hasToolResult: "yes" as never } }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(results.some((r) => r.severity === "error" && r.message.includes("hasToolResult"))).toBe(
+      true,
+    );
+  });
+
+  it("no error: hasToolResult is false (falsy but valid)", () => {
+    const fixtures = [makeFixture({ match: { userMessage: "test", hasToolResult: false } })];
+    const results = validateFixtures(fixtures);
+    expect(results.filter((r) => r.message.includes("hasToolResult"))).toHaveLength(0);
+  });
+
+  it("no error: hasToolResult is true", () => {
+    const fixtures = [makeFixture({ match: { userMessage: "test", hasToolResult: true } })];
+    const results = validateFixtures(fixtures);
+    expect(results.filter((r) => r.message.includes("hasToolResult"))).toHaveLength(0);
+  });
+
   // --- Warning checks ---
 
   it("warning: duplicate userMessage", () => {
     const fixtures = [
       makeFixture({ match: { userMessage: "hello" } }),
       makeFixture({ match: { userMessage: "hello" } }),
+    ];
+    const results = validateFixtures(fixtures);
+    expect(results.some((r) => r.severity === "warning" && r.message.includes("duplicate"))).toBe(
+      true,
+    );
+  });
+
+  it("no warning: same userMessage but different turnIndex", () => {
+    const fixtures = [
+      makeFixture({ match: { userMessage: "hello", turnIndex: 0 } }),
+      makeFixture({ match: { userMessage: "hello", turnIndex: 1 } }),
+    ];
+    const results = validateFixtures(fixtures);
+    const duplicateWarnings = results.filter(
+      (r) => r.severity === "warning" && r.message.includes("duplicate"),
+    );
+    expect(duplicateWarnings).toHaveLength(0);
+  });
+
+  it("no warning: same userMessage but different hasToolResult", () => {
+    const fixtures = [
+      makeFixture({ match: { userMessage: "hello", hasToolResult: false } }),
+      makeFixture({ match: { userMessage: "hello", hasToolResult: true } }),
+    ];
+    const results = validateFixtures(fixtures);
+    const duplicateWarnings = results.filter(
+      (r) => r.severity === "warning" && r.message.includes("duplicate"),
+    );
+    expect(duplicateWarnings).toHaveLength(0);
+  });
+
+  it("no warning: same userMessage but different sequenceIndex", () => {
+    const fixtures = [
+      makeFixture({ match: { userMessage: "hello", sequenceIndex: 0 } }),
+      makeFixture({ match: { userMessage: "hello", sequenceIndex: 1 } }),
+    ];
+    const results = validateFixtures(fixtures);
+    const duplicateWarnings = results.filter(
+      (r) => r.severity === "warning" && r.message.includes("duplicate"),
+    );
+    expect(duplicateWarnings).toHaveLength(0);
+  });
+
+  it("warning: same userMessage with identical turnIndex/hasToolResult/sequenceIndex", () => {
+    const fixtures = [
+      makeFixture({ match: { userMessage: "hello", turnIndex: 1, hasToolResult: true } }),
+      makeFixture({ match: { userMessage: "hello", turnIndex: 1, hasToolResult: true } }),
     ];
     const results = validateFixtures(fixtures);
     expect(results.some((r) => r.severity === "warning" && r.message.includes("duplicate"))).toBe(
