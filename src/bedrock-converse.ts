@@ -75,6 +75,14 @@ function converseStopReason(
   return overrideFinishReason;
 }
 
+/**
+ * Build Converse-format usage from fixture overrides.
+ *
+ * When no overrides are provided (the common case for mocks), all token
+ * counts default to zero.  This is intentional — aimock is a mock server
+ * and does not perform real tokenisation.  Callers that need non-zero
+ * usage should supply explicit `usage` overrides in their fixture.
+ */
 function converseUsage(overrides?: ResponseOverrides): {
   inputTokens: number;
   outputTokens: number;
@@ -113,7 +121,6 @@ function buildBedrockStreamTextEvents(
     events.push({
       eventType: "contentBlockStart",
       payload: {
-        contentBlockIndex: blockIndex,
         contentBlockStart: { contentBlockIndex: blockIndex, start: { type: "thinking" } },
       },
     });
@@ -121,7 +128,6 @@ function buildBedrockStreamTextEvents(
       events.push({
         eventType: "contentBlockDelta",
         payload: {
-          contentBlockIndex: blockIndex,
           contentBlockDelta: {
             contentBlockIndex: blockIndex,
             delta: { type: "thinking_delta", thinking: reasoning.slice(i, i + chunkSize) },
@@ -129,14 +135,16 @@ function buildBedrockStreamTextEvents(
         },
       });
     }
-    events.push({ eventType: "contentBlockStop", payload: { contentBlockIndex: blockIndex } });
+    events.push({
+      eventType: "contentBlockStop",
+      payload: { contentBlockStop: { contentBlockIndex: blockIndex } },
+    });
   }
 
   const textBlockIndex = reasoning ? 1 : 0;
   events.push({
     eventType: "contentBlockStart",
     payload: {
-      contentBlockIndex: textBlockIndex,
       contentBlockStart: { contentBlockIndex: textBlockIndex, start: { type: "text" } },
     },
   });
@@ -144,7 +152,6 @@ function buildBedrockStreamTextEvents(
     events.push({
       eventType: "contentBlockDelta",
       payload: {
-        contentBlockIndex: textBlockIndex,
         contentBlockDelta: {
           contentBlockIndex: textBlockIndex,
           delta: { type: "text_delta", text: content.slice(i, i + chunkSize) },
@@ -152,10 +159,20 @@ function buildBedrockStreamTextEvents(
       },
     });
   }
-  events.push({ eventType: "contentBlockStop", payload: { contentBlockIndex: textBlockIndex } });
+  events.push({
+    eventType: "contentBlockStop",
+    payload: { contentBlockStop: { contentBlockIndex: textBlockIndex } },
+  });
   events.push({
     eventType: "messageStop",
-    payload: { stopReason: converseStopReason(overrides?.finishReason, "end_turn") },
+    payload: {
+      messageStop: { stopReason: converseStopReason(overrides?.finishReason, "end_turn") },
+    },
+  });
+  const usage = converseUsage(overrides);
+  events.push({
+    eventType: "metadata",
+    payload: { metadata: { usage, metrics: { latencyMs: 0 } } },
   });
   return events;
 }
@@ -168,11 +185,10 @@ function buildBedrockStreamContentWithToolCallsEvents(
   reasoning?: string,
   overrides?: ResponseOverrides,
 ): Array<{ eventType: string; payload: object }> {
-  const events = buildBedrockStreamTextEvents(content, chunkSize, reasoning, {
-    ...overrides,
-    finishReason: "stop",
-  });
-  events.pop();
+  const events = buildBedrockStreamTextEvents(content, chunkSize, reasoning, overrides);
+  // Remove trailing metadata + messageStop events — we re-emit them after tool blocks
+  events.pop(); // metadata
+  events.pop(); // messageStop
   let blockIndex = reasoning ? 2 : 1;
 
   for (const tc of toolCalls) {
@@ -180,7 +196,6 @@ function buildBedrockStreamContentWithToolCallsEvents(
     events.push({
       eventType: "contentBlockStart",
       payload: {
-        contentBlockIndex: blockIndex,
         contentBlockStart: {
           contentBlockIndex: blockIndex,
           start: { toolUse: { toolUseId, name: tc.name } },
@@ -192,7 +207,6 @@ function buildBedrockStreamContentWithToolCallsEvents(
       events.push({
         eventType: "contentBlockDelta",
         payload: {
-          contentBlockIndex: blockIndex,
           contentBlockDelta: {
             contentBlockIndex: blockIndex,
             delta: { toolUse: { input: argsStr.slice(i, i + chunkSize) } },
@@ -200,12 +214,22 @@ function buildBedrockStreamContentWithToolCallsEvents(
         },
       });
     }
-    events.push({ eventType: "contentBlockStop", payload: { contentBlockIndex: blockIndex } });
+    events.push({
+      eventType: "contentBlockStop",
+      payload: { contentBlockStop: { contentBlockIndex: blockIndex } },
+    });
     blockIndex++;
   }
   events.push({
     eventType: "messageStop",
-    payload: { stopReason: converseStopReason(overrides?.finishReason, "tool_use") },
+    payload: {
+      messageStop: { stopReason: converseStopReason(overrides?.finishReason, "tool_use") },
+    },
+  });
+  const usage = converseUsage(overrides);
+  events.push({
+    eventType: "metadata",
+    payload: { metadata: { usage, metrics: { latencyMs: 0 } } },
   });
   return events;
 }
@@ -226,7 +250,6 @@ function buildBedrockStreamToolCallEvents(
     events.push({
       eventType: "contentBlockStart",
       payload: {
-        contentBlockIndex: tcIdx,
         contentBlockStart: {
           contentBlockIndex: tcIdx,
           start: { toolUse: { toolUseId, name: tc.name } },
@@ -238,7 +261,6 @@ function buildBedrockStreamToolCallEvents(
       events.push({
         eventType: "contentBlockDelta",
         payload: {
-          contentBlockIndex: tcIdx,
           contentBlockDelta: {
             contentBlockIndex: tcIdx,
             delta: { toolUse: { input: argsStr.slice(i, i + chunkSize) } },
@@ -246,11 +268,21 @@ function buildBedrockStreamToolCallEvents(
         },
       });
     }
-    events.push({ eventType: "contentBlockStop", payload: { contentBlockIndex: tcIdx } });
+    events.push({
+      eventType: "contentBlockStop",
+      payload: { contentBlockStop: { contentBlockIndex: tcIdx } },
+    });
   }
   events.push({
     eventType: "messageStop",
-    payload: { stopReason: converseStopReason(overrides?.finishReason, "tool_use") },
+    payload: {
+      messageStop: { stopReason: converseStopReason(overrides?.finishReason, "tool_use") },
+    },
+  });
+  const usage = converseUsage(overrides);
+  events.push({
+    eventType: "metadata",
+    payload: { metadata: { usage, metrics: { latencyMs: 0 } } },
   });
   return events;
 }
@@ -260,6 +292,7 @@ function buildBedrockStreamToolCallEvents(
 export function converseToCompletionRequest(
   req: ConverseRequest,
   modelId: string,
+  logger?: Logger,
 ): ChatCompletionRequest {
   const messages: ChatMessage[] = [];
 
@@ -275,7 +308,17 @@ export function converseToCompletionRequest(
     if (msg.role === "user") {
       // Check for toolResult blocks
       const toolResults = msg.content.filter((b) => b.toolResult);
-      const textBlocks = msg.content.filter((b) => b.text !== undefined && !b.toolResult);
+      const textBlocks = msg.content.filter(
+        (b) => b.text !== undefined && b.text !== "" && !b.toolResult,
+      );
+      const unsupportedBlocks = msg.content.filter(
+        (b) => b.text === undefined && !b.toolResult && !b.toolUse,
+      );
+      if (unsupportedBlocks.length > 0 && logger) {
+        logger.warn(
+          `Converse user message contains unsupported content block types — these will be dropped during conversion`,
+        );
+      }
 
       if (toolResults.length > 0) {
         for (const block of toolResults) {
@@ -298,21 +341,21 @@ export function converseToCompletionRequest(
 
       // Plain user message
       const text = msg.content
-        .filter((b) => b.text !== undefined)
+        .filter((b) => b.text !== undefined && b.text !== "")
         .map((b) => b.text ?? "")
         .join("");
       messages.push({ role: "user", content: text });
     } else if (msg.role === "assistant") {
       const toolUseBlocks = msg.content.filter((b) => b.toolUse);
       const textContent = msg.content
-        .filter((b) => b.text !== undefined)
+        .filter((b) => b.text !== undefined && b.text !== "")
         .map((b) => b.text ?? "")
         .join("");
 
       if (toolUseBlocks.length > 0) {
         messages.push({
           role: "assistant",
-          content: textContent || null,
+          content: textContent ?? null,
           tool_calls: toolUseBlocks.map((b) => ({
             id: b.toolUse!.toolUseId,
             type: "function" as const,
@@ -323,7 +366,12 @@ export function converseToCompletionRequest(
           })),
         });
       } else {
-        messages.push({ role: "assistant", content: textContent || null });
+        messages.push({ role: "assistant", content: textContent ?? null });
+      }
+    } else {
+      const warnMsg = `Unexpected message role "${msg.role}" in Converse request — skipping`;
+      if (logger) {
+        logger.warn(warnMsg);
       }
     }
   }
@@ -336,7 +384,9 @@ export function converseToCompletionRequest(
       function: {
         name: t.toolSpec.name,
         description: t.toolSpec.description,
-        parameters: t.toolSpec.inputSchema,
+        parameters: (t.toolSpec.inputSchema && "json" in t.toolSpec.inputSchema
+          ? (t.toolSpec.inputSchema as Record<string, unknown>).json
+          : t.toolSpec.inputSchema) as object | undefined,
       },
     }));
   }
@@ -518,7 +568,7 @@ export async function handleConverse(
     return;
   }
 
-  const completionReq = converseToCompletionRequest(converseReq, modelId);
+  const completionReq = converseToCompletionRequest(converseReq, modelId, logger);
   completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
@@ -623,7 +673,7 @@ export async function handleConverse(
     const errBody = {
       type: "error",
       error: {
-        type: response.error.type || "invalid_request_error",
+        type: response.error.type ?? "invalid_request_error",
         message: response.error.message,
       },
     };
@@ -681,6 +731,11 @@ export async function handleConverse(
 
   // Tool call response
   if (isToolCallResponse(response)) {
+    if ("webSearches" in response) {
+      logger.warn(
+        "webSearches in fixture response are not supported for Bedrock Converse API — ignoring",
+      );
+    }
     const overrides = extractOverrides(response);
     journal.add({
       method: req.method ?? "POST",
@@ -775,7 +830,8 @@ export async function handleConverseStream(
     return;
   }
 
-  const completionReq = converseToCompletionRequest(converseReq, modelId);
+  const completionReq = converseToCompletionRequest(converseReq, modelId, logger);
+  completionReq.stream = true;
   completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
@@ -882,7 +938,7 @@ export async function handleConverseStream(
     const errBody = {
       type: "error",
       error: {
-        type: response.error.type || "invalid_request_error",
+        type: response.error.type ?? "invalid_request_error",
         message: response.error.message,
       },
     };
@@ -968,6 +1024,11 @@ export async function handleConverseStream(
 
   // Tool call response — stream as Event Stream
   if (isToolCallResponse(response)) {
+    if ("webSearches" in response) {
+      logger.warn(
+        "webSearches in fixture response are not supported for Bedrock Converse API — ignoring",
+      );
+    }
     const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
