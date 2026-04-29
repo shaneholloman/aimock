@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as http from "node:http";
 import { crc32 } from "node:zlib";
-import type { Fixture, HandlerDefaults } from "../types.js";
+import type { Fixture } from "../types.js";
 import { createServer, type ServerInstance } from "../server.js";
 import {
   converseToCompletionRequest,
@@ -9,7 +9,7 @@ import {
   handleConverseStream,
 } from "../bedrock-converse.js";
 import { Journal } from "../journal.js";
-import { Logger } from "../logger.js";
+import { createMockReq, createMockRes, createDefaults } from "./helpers/mock-res.js";
 
 // --- helpers ---
 
@@ -161,6 +161,13 @@ function postPartialBinary(
     const parsed = new URL(url);
     const chunks: Buffer[] = [];
     let aborted = false;
+    let resolved = false;
+    const safeResolve = (value: { body: Buffer; aborted: boolean }) => {
+      if (!resolved) {
+        resolved = true;
+        resolve(value);
+      }
+    };
     const req = http.request(
       {
         hostname: parsed.hostname,
@@ -175,7 +182,7 @@ function postPartialBinary(
       (res) => {
         res.on("data", (c: Buffer) => chunks.push(c));
         res.on("end", () => {
-          resolve({ body: Buffer.concat(chunks), aborted });
+          safeResolve({ body: Buffer.concat(chunks), aborted });
         });
         res.on("error", () => {
           aborted = true;
@@ -184,13 +191,13 @@ function postPartialBinary(
           aborted = true;
         });
         res.on("close", () => {
-          resolve({ body: Buffer.concat(chunks), aborted });
+          safeResolve({ body: Buffer.concat(chunks), aborted });
         });
       },
     );
     req.on("error", () => {
       aborted = true;
-      resolve({ body: Buffer.concat(chunks), aborted });
+      safeResolve({ body: Buffer.concat(chunks), aborted });
     });
     req.write(data);
     req.end();
@@ -775,7 +782,7 @@ describe("POST /model/{modelId}/converse-stream", () => {
     expect(fullText).toBe("Hi there!");
 
     const msgStop = frames.find((f) => f.eventType === "messageStop");
-    expect(msgStop!.payload).toEqual({ stopReason: "end_turn" });
+    expect(msgStop!.payload).toEqual({ messageStop: { stopReason: "end_turn" } });
   });
 
   it("returns tool call response as Event Stream", async () => {
@@ -810,7 +817,7 @@ describe("POST /model/{modelId}/converse-stream", () => {
     expect(JSON.parse(fullJson)).toEqual({ city: "SF" });
 
     const msgStop = frames.find((f) => f.eventType === "messageStop");
-    expect(msgStop!.payload).toEqual({ stopReason: "tool_use" });
+    expect(msgStop!.payload).toEqual({ messageStop: { stopReason: "tool_use" } });
   });
 
   it("supports streaming profile (ttft/tps)", async () => {
@@ -946,7 +953,240 @@ describe("POST /model/{modelId}/converse-stream (content + toolCalls)", () => {
 
     // messageStop with tool_use stop reason
     const msgStop = frames.find((f) => f.eventType === "messageStop");
-    expect(msgStop!.payload).toEqual({ stopReason: "tool_use" });
+    expect(msgStop!.payload).toEqual({ messageStop: { stopReason: "tool_use" } });
+  });
+});
+
+// ─── converse-stream: contentBlockStop wrapper shape ──────────────────────────
+
+describe("POST /model/{modelId}/converse-stream (contentBlockStop wrapper shape)", () => {
+  const MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0";
+
+  it("contentBlockStop events have wrapped { contentBlockStop: { contentBlockIndex: N } } shape", async () => {
+    instance = await createServer(allFixtures);
+    const res = await postBinary(`${instance.url}/model/${MODEL_ID}/converse-stream`, {
+      messages: [{ role: "user", content: [{ text: "hello" }] }],
+    });
+
+    expect(res.status).toBe(200);
+    const frames = parseFrames(res.body);
+
+    const stopFrames = frames.filter((f) => f.eventType === "contentBlockStop");
+    expect(stopFrames.length).toBeGreaterThanOrEqual(1);
+
+    for (const frame of stopFrames) {
+      // Must be the wrapped shape, not the flat { contentBlockIndex: N }
+      const payload = frame.payload as { contentBlockStop: { contentBlockIndex: number } };
+      expect(payload).toHaveProperty("contentBlockStop");
+      expect(payload.contentBlockStop).toHaveProperty("contentBlockIndex");
+      expect(typeof payload.contentBlockStop.contentBlockIndex).toBe("number");
+      // Must NOT have a top-level contentBlockIndex (that would be the flat shape)
+      expect(Object.keys(payload)).toEqual(["contentBlockStop"]);
+    }
+  });
+
+  it("tool-call contentBlockStop events also have the wrapped shape", async () => {
+    instance = await createServer(allFixtures);
+    const res = await postBinary(`${instance.url}/model/${MODEL_ID}/converse-stream`, {
+      messages: [{ role: "user", content: [{ text: "weather" }] }],
+    });
+
+    expect(res.status).toBe(200);
+    const frames = parseFrames(res.body);
+
+    const stopFrames = frames.filter((f) => f.eventType === "contentBlockStop");
+    expect(stopFrames.length).toBeGreaterThanOrEqual(1);
+
+    for (const frame of stopFrames) {
+      const payload = frame.payload as { contentBlockStop: { contentBlockIndex: number } };
+      expect(payload).toHaveProperty("contentBlockStop");
+      expect(payload.contentBlockStop).toHaveProperty("contentBlockIndex");
+      expect(Object.keys(payload)).toEqual(["contentBlockStop"]);
+    }
+  });
+
+  it("messageStop events have the wrapped { messageStop: { stopReason: '...' } } shape", async () => {
+    instance = await createServer(allFixtures);
+    const res = await postBinary(`${instance.url}/model/${MODEL_ID}/converse-stream`, {
+      messages: [{ role: "user", content: [{ text: "hello" }] }],
+    });
+
+    expect(res.status).toBe(200);
+    const frames = parseFrames(res.body);
+
+    const msgStopFrames = frames.filter((f) => f.eventType === "messageStop");
+    expect(msgStopFrames).toHaveLength(1);
+
+    const payload = msgStopFrames[0].payload as { messageStop: { stopReason: string } };
+    expect(payload).toHaveProperty("messageStop");
+    expect(payload.messageStop).toHaveProperty("stopReason");
+    expect(Object.keys(payload)).toEqual(["messageStop"]);
+  });
+});
+
+// ─── converse-stream: contentWithToolCalls full structure ─────────────────────
+
+describe("POST /model/{modelId}/converse-stream (contentWithToolCalls full structure)", () => {
+  const MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0";
+
+  it("verifies complete event sequence for content + tool calls", async () => {
+    instance = await createServer(allFixtures);
+    const res = await postBinary(`${instance.url}/model/${MODEL_ID}/converse-stream`, {
+      messages: [{ role: "user", content: [{ text: "search-and-explain" }] }],
+    });
+
+    expect(res.status).toBe(200);
+    const frames = parseFrames(res.body);
+
+    // 1. Stream starts with messageStart (role: assistant)
+    expect(frames[0].eventType).toBe("messageStart");
+    expect(frames[0].payload).toEqual({ messageStart: { role: "assistant" } });
+
+    // 2. Collect all contentBlockStart frames
+    const blockStarts = frames.filter((f) => f.eventType === "contentBlockStart");
+    expect(blockStarts.length).toBe(2); // one text, one tool
+
+    // 3. Text content block appears before tool call block
+    const textBlockStartIdx = frames.findIndex(
+      (f) =>
+        f.eventType === "contentBlockStart" &&
+        (f.payload as { contentBlockStart?: { start?: { type?: string } } }).contentBlockStart
+          ?.start?.type === "text",
+    );
+    const toolBlockStartIdx = frames.findIndex(
+      (f) =>
+        f.eventType === "contentBlockStart" &&
+        (f.payload as { contentBlockStart?: { start?: { toolUse?: unknown } } }).contentBlockStart
+          ?.start?.toolUse !== undefined,
+    );
+    expect(textBlockStartIdx).toBeLessThan(toolBlockStartIdx);
+
+    // 4. Tool call block has contentBlockStart with toolUse (toolUseId + name)
+    const toolBlockStart = frames[toolBlockStartIdx];
+    const toolStartPayload = toolBlockStart.payload as {
+      contentBlockStart: {
+        contentBlockIndex: number;
+        start: { toolUse: { toolUseId: string; name: string } };
+      };
+    };
+    expect(toolStartPayload.contentBlockStart.start.toolUse.name).toBe("web_search");
+    expect(toolStartPayload.contentBlockStart.start.toolUse.toolUseId).toBeDefined();
+    expect(typeof toolStartPayload.contentBlockStart.start.toolUse.toolUseId).toBe("string");
+
+    // 5. Tool call block has contentBlockDelta chunks after its start
+    const toolBlockIndex = toolStartPayload.contentBlockStart.contentBlockIndex;
+    const toolDeltas = frames.filter(
+      (f) =>
+        f.eventType === "contentBlockDelta" &&
+        (f.payload as { contentBlockDelta?: { contentBlockIndex?: number } }).contentBlockDelta
+          ?.contentBlockIndex === toolBlockIndex,
+    );
+    expect(toolDeltas.length).toBeGreaterThanOrEqual(1);
+
+    // 6. Tool call block has contentBlockStop
+    const toolBlockStop = frames.find(
+      (f) =>
+        f.eventType === "contentBlockStop" &&
+        (f.payload as { contentBlockStop?: { contentBlockIndex?: number } }).contentBlockStop
+          ?.contentBlockIndex === toolBlockIndex,
+    );
+    expect(toolBlockStop).toBeDefined();
+    expect(toolBlockStop!.payload).toEqual({
+      contentBlockStop: { contentBlockIndex: toolBlockIndex },
+    });
+
+    // 7. Stream ends with messageStop (stopReason: tool_use) then metadata
+    const msgStopIdx = frames.findIndex((f) => f.eventType === "messageStop");
+    const metadataIdx = frames.findIndex((f) => f.eventType === "metadata");
+    expect(msgStopIdx).toBeGreaterThan(-1);
+    expect(metadataIdx).toBeGreaterThan(-1);
+    expect(metadataIdx).toBe(msgStopIdx + 1); // metadata immediately follows messageStop
+    expect(metadataIdx).toBe(frames.length - 1); // metadata is last frame
+
+    const msgStopPayload = frames[msgStopIdx].payload as {
+      messageStop: { stopReason: string };
+    };
+    expect(msgStopPayload).toEqual({ messageStop: { stopReason: "tool_use" } });
+
+    // 8. contentBlockIndex values are sequential across text and tool blocks
+    const allBlockStarts = frames
+      .filter((f) => f.eventType === "contentBlockStart")
+      .map(
+        (f) =>
+          (f.payload as { contentBlockStart: { contentBlockIndex: number } }).contentBlockStart
+            .contentBlockIndex,
+      );
+    expect(allBlockStarts).toEqual([0, 1]);
+
+    const allBlockStops = frames
+      .filter((f) => f.eventType === "contentBlockStop")
+      .map(
+        (f) =>
+          (f.payload as { contentBlockStop: { contentBlockIndex: number } }).contentBlockStop
+            .contentBlockIndex,
+      );
+    expect(allBlockStops).toEqual([0, 1]);
+  });
+
+  it("verifies sequential contentBlockIndex with multiple tool calls", async () => {
+    const multiToolContentFixture: Fixture = {
+      match: { userMessage: "multi-tool-with-text" },
+      response: {
+        content: "I will use two tools.",
+        toolCalls: [
+          { name: "tool_a", arguments: '{"x":1}' },
+          { name: "tool_b", arguments: '{"y":2}' },
+        ],
+      },
+    };
+    instance = await createServer([multiToolContentFixture]);
+    const res = await postBinary(`${instance.url}/model/${MODEL_ID}/converse-stream`, {
+      messages: [{ role: "user", content: [{ text: "multi-tool-with-text" }] }],
+    });
+
+    expect(res.status).toBe(200);
+    const frames = parseFrames(res.body);
+
+    // contentBlockIndex: 0 = text, 1 = tool_a, 2 = tool_b
+    const blockStarts = frames.filter((f) => f.eventType === "contentBlockStart");
+    expect(blockStarts).toHaveLength(3);
+
+    const indices = blockStarts.map(
+      (f) =>
+        (f.payload as { contentBlockStart: { contentBlockIndex: number } }).contentBlockStart
+          .contentBlockIndex,
+    );
+    expect(indices).toEqual([0, 1, 2]);
+
+    // Text block at index 0
+    const textStart = blockStarts[0].payload as {
+      contentBlockStart: { start: { type: string } };
+    };
+    expect(textStart.contentBlockStart.start.type).toBe("text");
+
+    // Tool blocks at indices 1 and 2
+    const tool1Start = blockStarts[1].payload as {
+      contentBlockStart: { start: { toolUse: { name: string } } };
+    };
+    expect(tool1Start.contentBlockStart.start.toolUse.name).toBe("tool_a");
+
+    const tool2Start = blockStarts[2].payload as {
+      contentBlockStart: { start: { toolUse: { name: string } } };
+    };
+    expect(tool2Start.contentBlockStart.start.toolUse.name).toBe("tool_b");
+
+    // contentBlockStop indices are also sequential
+    const blockStops = frames.filter((f) => f.eventType === "contentBlockStop");
+    const stopIndices = blockStops.map(
+      (f) =>
+        (f.payload as { contentBlockStop: { contentBlockIndex: number } }).contentBlockStop
+          .contentBlockIndex,
+    );
+    expect(stopIndices).toEqual([0, 1, 2]);
+
+    // messageStop with tool_use
+    const msgStop = frames.find((f) => f.eventType === "messageStop");
+    expect(msgStop!.payload).toEqual({ messageStop: { stopReason: "tool_use" } });
   });
 });
 
@@ -1472,7 +1712,7 @@ describe("converseToCompletionRequest (edge cases)", () => {
       },
       "model",
     );
-    expect(result.messages[0]).toEqual({ role: "assistant", content: null });
+    expect(result.messages[0]).toEqual({ role: "assistant", content: "" });
   });
 
   it("handles user tool result with missing text in content items (text ?? '' fallback)", () => {
@@ -1583,8 +1823,8 @@ describe("converseToCompletionRequest (edge cases)", () => {
       "model",
     );
     expect(result.messages[0].tool_calls).toHaveLength(1);
-    // Empty text → content is null (falsy)
-    expect(result.messages[0].content).toBeNull();
+    // Empty text → content is "" (nullish coalescing preserves empty string)
+    expect(result.messages[0].content).toBe("");
   });
 });
 
@@ -1722,50 +1962,6 @@ describe("POST /model/{modelId}/invoke-with-response-stream (error fixture no ex
 });
 
 // ─── Direct handler tests for req.method/req.url fallback branches ──────────
-
-function createMockReq(overrides: Partial<http.IncomingMessage> = {}): http.IncomingMessage {
-  return {
-    method: undefined,
-    url: undefined,
-    headers: {},
-    ...overrides,
-  } as unknown as http.IncomingMessage;
-}
-
-function createMockRes(): http.ServerResponse & { _written: string; _status: number } {
-  const res = {
-    _written: "",
-    _status: 0,
-    writableEnded: false,
-    statusCode: 0,
-    writeHead(status: number) {
-      res._status = status;
-      res.statusCode = status;
-    },
-    setHeader() {},
-    write(data: string) {
-      res._written += data;
-      return true;
-    },
-    end(data?: string) {
-      if (data) res._written += data;
-      res.writableEnded = true;
-    },
-    destroy() {
-      res.writableEnded = true;
-    },
-  };
-  return res as unknown as http.ServerResponse & { _written: string; _status: number };
-}
-
-function createDefaults(overrides: Partial<HandlerDefaults> = {}): HandlerDefaults {
-  return {
-    latency: 0,
-    chunkSize: 100,
-    logger: new Logger("silent"),
-    ...overrides,
-  };
-}
 
 describe("handleConverse (direct handler call, method/url fallbacks)", () => {
   it("uses fallback for text response with undefined method/url", async () => {
