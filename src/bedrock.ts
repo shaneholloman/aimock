@@ -561,50 +561,101 @@ export async function handleBedrock(
 
 // ─── Streaming event builders ───────────────────────────────────────────────
 
+const BEDROCK_INVOKE_STREAM_EVENT_TYPE = "chunk";
+
+function buildBedrockInvokeMessageStart(
+  model: string,
+  overrides?: ResponseOverrides,
+): { eventType: string; payload: object } {
+  return {
+    eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
+    payload: {
+      type: "message_start",
+      message: {
+        id: overrides?.id ?? generateMessageId(),
+        type: "message",
+        role: "assistant",
+        content: [],
+        model: overrides?.model ?? model,
+        stop_reason: null,
+        stop_sequence: null,
+        usage: bedrockUsage(overrides),
+      },
+    },
+  };
+}
+
+function buildBedrockInvokeMessageDelta(stopReason: string): {
+  eventType: string;
+  payload: object;
+} {
+  return {
+    eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
+    payload: {
+      type: "message_delta",
+      delta: { stop_reason: stopReason, stop_sequence: null },
+      usage: { output_tokens: 0 },
+    },
+  };
+}
+
+function buildBedrockInvokeMessageStop(): { eventType: string; payload: object } {
+  return {
+    eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
+    payload: { type: "message_stop" },
+  };
+}
+
+function parseToolArgumentsForStream(toolCall: ToolCall, logger: Logger): string {
+  try {
+    const parsed = JSON.parse(toolCall.arguments || "{}");
+    return JSON.stringify(parsed);
+  } catch {
+    logger.warn(
+      `Malformed JSON in fixture tool call arguments for "${toolCall.name}": ${toolCall.arguments}`,
+    );
+    return "{}";
+  }
+}
+
 export function buildBedrockStreamTextEvents(
   content: string,
+  model: string,
   chunkSize: number,
   reasoning?: string,
   overrides?: ResponseOverrides,
 ): Array<{ eventType: string; payload: object }> {
   const events: Array<{ eventType: string; payload: object }> = [];
 
-  events.push({
-    eventType: "messageStart",
-    payload: { messageStart: { role: "assistant" } },
-  });
+  events.push(buildBedrockInvokeMessageStart(model, overrides));
 
   // Thinking block (emitted before text when reasoning is present)
   if (reasoning) {
     const blockIndex = 0;
     events.push({
-      eventType: "contentBlockStart",
+      eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
       payload: {
-        contentBlockIndex: blockIndex,
-        contentBlockStart: {
-          contentBlockIndex: blockIndex,
-          start: { type: "thinking" },
-        },
+        type: "content_block_start",
+        index: blockIndex,
+        content_block: { type: "thinking", thinking: "" },
       },
     });
 
     for (let i = 0; i < reasoning.length; i += chunkSize) {
       const slice = reasoning.slice(i, i + chunkSize);
       events.push({
-        eventType: "contentBlockDelta",
+        eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
         payload: {
-          contentBlockIndex: blockIndex,
-          contentBlockDelta: {
-            contentBlockIndex: blockIndex,
-            delta: { type: "thinking_delta", thinking: slice },
-          },
+          type: "content_block_delta",
+          index: blockIndex,
+          delta: { type: "thinking_delta", thinking: slice },
         },
       });
     }
 
     events.push({
-      eventType: "contentBlockStop",
-      payload: { contentBlockIndex: blockIndex },
+      eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
+      payload: { type: "content_block_stop", index: blockIndex },
     });
   }
 
@@ -612,39 +663,35 @@ export function buildBedrockStreamTextEvents(
   const textBlockIndex = reasoning ? 1 : 0;
 
   events.push({
-    eventType: "contentBlockStart",
+    eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
     payload: {
-      contentBlockIndex: textBlockIndex,
-      contentBlockStart: {
-        contentBlockIndex: textBlockIndex,
-        start: { type: "text" },
-      },
+      type: "content_block_start",
+      index: textBlockIndex,
+      content_block: { type: "text", text: "" },
     },
   });
 
   for (let i = 0; i < content.length; i += chunkSize) {
     const slice = content.slice(i, i + chunkSize);
     events.push({
-      eventType: "contentBlockDelta",
+      eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
       payload: {
-        contentBlockIndex: textBlockIndex,
-        contentBlockDelta: {
-          contentBlockIndex: textBlockIndex,
-          delta: { type: "text_delta", text: slice },
-        },
+        type: "content_block_delta",
+        index: textBlockIndex,
+        delta: { type: "text_delta", text: slice },
       },
     });
   }
 
   events.push({
-    eventType: "contentBlockStop",
-    payload: { contentBlockIndex: textBlockIndex },
+    eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
+    payload: { type: "content_block_stop", index: textBlockIndex },
   });
 
-  events.push({
-    eventType: "messageStop",
-    payload: { stopReason: bedrockStopReason(overrides?.finishReason, "end_turn") },
-  });
+  events.push(
+    buildBedrockInvokeMessageDelta(bedrockStopReason(overrides?.finishReason, "end_turn")),
+  );
+  events.push(buildBedrockInvokeMessageStop());
 
   return events;
 }
@@ -652,6 +699,7 @@ export function buildBedrockStreamTextEvents(
 export function buildBedrockStreamContentWithToolCallsEvents(
   content: string,
   toolCalls: ToolCall[],
+  model: string,
   chunkSize: number,
   logger: Logger,
   reasoning?: string,
@@ -659,72 +707,61 @@ export function buildBedrockStreamContentWithToolCallsEvents(
 ): Array<{ eventType: string; payload: object }> {
   const events: Array<{ eventType: string; payload: object }> = [];
 
-  events.push({
-    eventType: "messageStart",
-    payload: { messageStart: { role: "assistant" } },
-  });
+  events.push(buildBedrockInvokeMessageStart(model, overrides));
 
   let blockIndex = 0;
 
   // Thinking block (emitted before text when reasoning is present)
   if (reasoning) {
     events.push({
-      eventType: "contentBlockStart",
+      eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
       payload: {
-        contentBlockIndex: blockIndex,
-        contentBlockStart: {
-          contentBlockIndex: blockIndex,
-          start: { type: "thinking" },
-        },
+        type: "content_block_start",
+        index: blockIndex,
+        content_block: { type: "thinking", thinking: "" },
       },
     });
     for (let i = 0; i < reasoning.length; i += chunkSize) {
       const slice = reasoning.slice(i, i + chunkSize);
       events.push({
-        eventType: "contentBlockDelta",
+        eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
         payload: {
-          contentBlockIndex: blockIndex,
-          contentBlockDelta: {
-            contentBlockIndex: blockIndex,
-            delta: { type: "thinking_delta", thinking: slice },
-          },
+          type: "content_block_delta",
+          index: blockIndex,
+          delta: { type: "thinking_delta", thinking: slice },
         },
       });
     }
     events.push({
-      eventType: "contentBlockStop",
-      payload: { contentBlockIndex: blockIndex },
+      eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
+      payload: { type: "content_block_stop", index: blockIndex },
     });
     blockIndex++;
   }
 
   // Text block
   events.push({
-    eventType: "contentBlockStart",
+    eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
     payload: {
-      contentBlockIndex: blockIndex,
-      contentBlockStart: {
-        contentBlockIndex: blockIndex,
-        start: { type: "text" },
-      },
+      type: "content_block_start",
+      index: blockIndex,
+      content_block: { type: "text", text: "" },
     },
   });
   for (let i = 0; i < content.length; i += chunkSize) {
     const slice = content.slice(i, i + chunkSize);
     events.push({
-      eventType: "contentBlockDelta",
+      eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
       payload: {
-        contentBlockIndex: blockIndex,
-        contentBlockDelta: {
-          contentBlockIndex: blockIndex,
-          delta: { type: "text_delta", text: slice },
-        },
+        type: "content_block_delta",
+        index: blockIndex,
+        delta: { type: "text_delta", text: slice },
       },
     });
   }
   events.push({
-    eventType: "contentBlockStop",
-    payload: { contentBlockIndex: blockIndex },
+    eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
+    payload: { type: "content_block_stop", index: blockIndex },
   });
   blockIndex++;
 
@@ -735,120 +772,100 @@ export function buildBedrockStreamContentWithToolCallsEvents(
     const currentBlock = blockIndex + tcIdx;
 
     events.push({
-      eventType: "contentBlockStart",
+      eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
       payload: {
-        contentBlockIndex: currentBlock,
-        contentBlockStart: {
-          contentBlockIndex: currentBlock,
-          start: { toolUse: { toolUseId, name: tc.name } },
+        type: "content_block_start",
+        index: currentBlock,
+        content_block: {
+          type: "tool_use",
+          id: toolUseId,
+          name: tc.name,
+          input: {},
         },
       },
     });
 
-    let argsStr: string;
-    try {
-      const parsed = JSON.parse(tc.arguments || "{}");
-      argsStr = JSON.stringify(parsed);
-    } catch {
-      logger.warn(
-        `Malformed JSON in fixture tool call arguments for "${tc.name}": ${tc.arguments}`,
-      );
-      argsStr = "{}";
-    }
+    const argsStr = parseToolArgumentsForStream(tc, logger);
 
     for (let i = 0; i < argsStr.length; i += chunkSize) {
       const slice = argsStr.slice(i, i + chunkSize);
       events.push({
-        eventType: "contentBlockDelta",
+        eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
         payload: {
-          contentBlockIndex: currentBlock,
-          contentBlockDelta: {
-            contentBlockIndex: currentBlock,
-            delta: { toolUse: { input: slice } },
-          },
+          type: "content_block_delta",
+          index: currentBlock,
+          delta: { type: "input_json_delta", partial_json: slice },
         },
       });
     }
 
     events.push({
-      eventType: "contentBlockStop",
-      payload: { contentBlockIndex: currentBlock },
+      eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
+      payload: { type: "content_block_stop", index: currentBlock },
     });
   }
 
-  events.push({
-    eventType: "messageStop",
-    payload: { stopReason: bedrockStopReason(overrides?.finishReason, "tool_use") },
-  });
+  events.push(
+    buildBedrockInvokeMessageDelta(bedrockStopReason(overrides?.finishReason, "tool_use")),
+  );
+  events.push(buildBedrockInvokeMessageStop());
 
   return events;
 }
 
 export function buildBedrockStreamToolCallEvents(
   toolCalls: ToolCall[],
+  model: string,
   chunkSize: number,
   logger: Logger,
   overrides?: ResponseOverrides,
 ): Array<{ eventType: string; payload: object }> {
   const events: Array<{ eventType: string; payload: object }> = [];
 
-  events.push({
-    eventType: "messageStart",
-    payload: { messageStart: { role: "assistant" } },
-  });
+  events.push(buildBedrockInvokeMessageStart(model, overrides));
 
   for (let tcIdx = 0; tcIdx < toolCalls.length; tcIdx++) {
     const tc = toolCalls[tcIdx];
     const toolUseId = tc.id || generateToolUseId();
 
     events.push({
-      eventType: "contentBlockStart",
+      eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
       payload: {
-        contentBlockIndex: tcIdx,
-        contentBlockStart: {
-          contentBlockIndex: tcIdx,
-          start: {
-            toolUse: { toolUseId, name: tc.name },
-          },
+        type: "content_block_start",
+        index: tcIdx,
+        content_block: {
+          type: "tool_use",
+          id: toolUseId,
+          name: tc.name,
+          input: {},
         },
       },
     });
 
-    let argsStr: string;
-    try {
-      const parsed = JSON.parse(tc.arguments || "{}");
-      argsStr = JSON.stringify(parsed);
-    } catch {
-      logger.warn(
-        `Malformed JSON in fixture tool call arguments for "${tc.name}": ${tc.arguments}`,
-      );
-      argsStr = "{}";
-    }
+    const argsStr = parseToolArgumentsForStream(tc, logger);
 
     for (let i = 0; i < argsStr.length; i += chunkSize) {
       const slice = argsStr.slice(i, i + chunkSize);
       events.push({
-        eventType: "contentBlockDelta",
+        eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
         payload: {
-          contentBlockIndex: tcIdx,
-          contentBlockDelta: {
-            contentBlockIndex: tcIdx,
-            delta: { toolUse: { input: slice } },
-          },
+          type: "content_block_delta",
+          index: tcIdx,
+          delta: { type: "input_json_delta", partial_json: slice },
         },
       });
     }
 
     events.push({
-      eventType: "contentBlockStop",
-      payload: { contentBlockIndex: tcIdx },
+      eventType: BEDROCK_INVOKE_STREAM_EVENT_TYPE,
+      payload: { type: "content_block_stop", index: tcIdx },
     });
   }
 
-  events.push({
-    eventType: "messageStop",
-    payload: { stopReason: bedrockStopReason(overrides?.finishReason, "tool_use") },
-  });
+  events.push(
+    buildBedrockInvokeMessageDelta(bedrockStopReason(overrides?.finishReason, "tool_use")),
+  );
+  events.push(buildBedrockInvokeMessageStop());
 
   return events;
 }
@@ -1041,6 +1058,7 @@ export async function handleBedrockStream(
     const events = buildBedrockStreamContentWithToolCallsEvents(
       response.content,
       response.toolCalls,
+      completionReq.model,
       chunkSize,
       logger,
       response.reasoning,
@@ -1077,6 +1095,7 @@ export async function handleBedrockStream(
     });
     const events = buildBedrockStreamTextEvents(
       response.content,
+      completionReq.model,
       chunkSize,
       response.reasoning,
       overrides,
@@ -1109,6 +1128,7 @@ export async function handleBedrockStream(
     });
     const events = buildBedrockStreamToolCallEvents(
       response.toolCalls,
+      completionReq.model,
       chunkSize,
       logger,
       overrides,
