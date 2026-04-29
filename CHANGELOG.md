@@ -1,5 +1,20 @@
 # @copilotkit/aimock
 
+## [1.16.1] - 2026-04-28
+
+### Fixed
+
+- **Responses API: item_reference dropped** — `responsesInputToMessages()` now synthesizes an assistant message with a matching `function_call` when a `function_call_output` has no prior matching call, preventing item_reference loss
+- **Responses API: annotations missing** — Added `annotations: []` to all four `output_text` content items (streaming `.added`, `.done`, prefix, and non-streaming) for schema conformance
+- **Responses API: item_id missing on reasoning events** — Added `item_id` to `reasoning_summary_part.added`, `reasoning_summary_part.done`, and `reasoning_summary_text.done` events
+- **Responses API: web_search_call action missing type** — Changed `action: { query }` to `action: { type: "search", query }` in both streaming events and output prefix
+- **Responses API: item_reference for text messages** — Extended item_reference handling to cover assistant text messages, not just function_call_output compensation
+- **Responses API: multi-fco assistantCount inflation** — Fixed backward scan in `responsesInputToMessages()` to find and append to existing assistant messages with tool_calls instead of creating duplicates
+
+### Added
+
+- **Debug logging across all LLM handlers** — Added `logger.debug("Fixture matched: ...")` on match and `logger.debug("No fixture matched...")` on no-match to: server.ts, responses.ts, messages.ts, gemini.ts, bedrock.ts, bedrock-converse.ts, cohere.ts, ollama.ts, embeddings.ts, images.ts, speech.ts, transcription.ts, video.ts
+
 ## 1.16.0
 
 ### Added
