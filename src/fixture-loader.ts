@@ -59,6 +59,12 @@ export function entryToFixture(entry: FixtureFileEntry): Fixture {
       responseFormat: entry.match.responseFormat,
       endpoint: entry.match.endpoint,
       ...(entry.match.sequenceIndex !== undefined && { sequenceIndex: entry.match.sequenceIndex }),
+      ...(entry.match.turnIndex !== undefined && {
+        turnIndex: entry.match.turnIndex,
+      }),
+      ...(entry.match.hasToolResult !== undefined && {
+        hasToolResult: entry.match.hasToolResult,
+      }),
     },
     response: normalizeResponse(entry.response),
     ...(entry.latency !== undefined && { latency: entry.latency }),
@@ -525,12 +531,37 @@ export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
       }
     }
 
+    // Match field type checks
+    if (f.match.turnIndex !== undefined) {
+      if (
+        typeof f.match.turnIndex !== "number" ||
+        f.match.turnIndex < 0 ||
+        !Number.isInteger(f.match.turnIndex)
+      ) {
+        results.push({
+          severity: "error",
+          fixtureIndex: i,
+          message: "match.turnIndex must be a non-negative integer",
+        });
+      }
+    }
+    if (f.match.hasToolResult !== undefined && typeof f.match.hasToolResult !== "boolean") {
+      results.push({
+        severity: "error",
+        fixtureIndex: i,
+        message: `match.hasToolResult must be a boolean, got ${typeof f.match.hasToolResult}`,
+      });
+    }
+
     // --- Warning checks ---
 
-    // Duplicate userMessage shadowing
+    // Duplicate userMessage shadowing — include turnIndex, hasToolResult, and
+    // sequenceIndex in the dedup key so that fixtures which share a userMessage
+    // but differ on those fields are NOT considered duplicates.
     const um = f.match.userMessage;
     if (typeof um === "string" && um) {
-      const prev = seenUserMessages.get(um);
+      const dedupKey = `${um}|${f.match.turnIndex}|${f.match.hasToolResult}|${f.match.sequenceIndex}`;
+      const prev = seenUserMessages.get(dedupKey);
       if (prev !== undefined) {
         results.push({
           severity: "warning",
@@ -538,7 +569,7 @@ export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
           message: `duplicate userMessage '${um}' — shadows fixture ${prev}`,
         });
       } else {
-        seenUserMessages.set(um, i);
+        seenUserMessages.set(dedupKey, i);
       }
     }
 
@@ -552,7 +583,9 @@ export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
       match.toolCallId !== undefined ||
       match.toolName !== undefined ||
       match.model !== undefined ||
-      match.predicate !== undefined;
+      match.predicate !== undefined ||
+      match.turnIndex !== undefined ||
+      match.hasToolResult !== undefined;
 
     if (!hasDiscriminator && i < fixtures.length - 1) {
       results.push({
