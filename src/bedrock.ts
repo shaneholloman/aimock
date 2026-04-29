@@ -95,6 +95,15 @@ function bedrockStopReason(
   return overrideFinishReason;
 }
 
+/**
+ * Build a Bedrock-style usage object from optional overrides.
+ *
+ * When no overrides are provided (the common case for mock fixtures),
+ * returns all-zero token counts. This is intentional — aimock does not
+ * attempt to estimate token usage from fixture content. Callers that
+ * need realistic usage numbers should set `usage` in their fixture's
+ * response overrides.
+ */
 function bedrockUsage(overrides?: ResponseOverrides): {
   input_tokens: number;
   output_tokens: number;
@@ -119,6 +128,7 @@ function extractTextContent(content: string | BedrockContentBlock[]): string {
 export function bedrockToCompletionRequest(
   req: BedrockRequest,
   modelId: string,
+  logger?: Logger,
 ): ChatCompletionRequest {
   const messages: ChatMessage[] = [];
 
@@ -140,6 +150,17 @@ export function bedrockToCompletionRequest(
     if (msg.role === "user") {
       // Check for tool_result blocks
       if (typeof msg.content !== "string" && Array.isArray(msg.content)) {
+        // Warn about non-text content blocks that will be dropped (image, document, etc.)
+        const unsupportedBlocks = msg.content.filter(
+          (b) => b.type !== "text" && b.type !== "tool_result",
+        );
+        if (unsupportedBlocks.length > 0 && logger) {
+          const types = [...new Set(unsupportedBlocks.map((b) => b.type))].join(", ");
+          logger.warn(
+            `Bedrock user message contains unsupported content block types [${types}] — these will be dropped during conversion`,
+          );
+        }
+
         const toolResults = msg.content.filter((b) => b.type === "tool_result");
         const textBlocks = msg.content.filter((b) => b.type === "text");
 
@@ -183,21 +204,34 @@ export function bedrockToCompletionRequest(
         if (toolUseBlocks.length > 0) {
           messages.push({
             role: "assistant",
-            content: textContent || null,
-            tool_calls: toolUseBlocks.map((b) => ({
-              id: b.id ?? generateToolUseId(),
-              type: "function" as const,
-              function: {
-                name: b.name ?? "",
-                arguments: typeof b.input === "string" ? b.input : JSON.stringify(b.input ?? {}),
-              },
-            })),
+            content: textContent ?? null,
+            tool_calls: toolUseBlocks.map((b, index) => {
+              if (!b.id && logger) {
+                logger.warn(
+                  `Bedrock assistant tool_use block at index ${index} is missing an id — using deterministic fallback "tool_use_${index}"`,
+                );
+              }
+              return {
+                id: b.id ?? `tool_use_${index}`,
+                type: "function" as const,
+                function: {
+                  name: b.name ?? "",
+                  arguments: typeof b.input === "string" ? b.input : JSON.stringify(b.input ?? {}),
+                },
+              };
+            }),
           });
         } else {
-          messages.push({ role: "assistant", content: textContent || null });
+          messages.push({ role: "assistant", content: textContent ?? null });
         }
       } else {
         messages.push({ role: "assistant", content: null });
+      }
+    } else {
+      if (logger) {
+        logger.warn(
+          `Bedrock message has unexpected role "${(msg as { role: string }).role}" — skipping`,
+        );
       }
     }
   }
@@ -347,7 +381,7 @@ export async function handleBedrock(
   }
 
   // Convert to ChatCompletionRequest for fixture matching
-  const completionReq = bedrockToCompletionRequest(bedrockReq, modelId);
+  const completionReq = bedrockToCompletionRequest(bedrockReq, modelId, logger);
   completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
@@ -449,7 +483,8 @@ export async function handleBedrock(
       body: completionReq,
       response: { status, fixture },
     });
-    // Anthropic-style error format (Bedrock uses Claude): { type: "error", error: { type, message } }
+    // Bedrock Claude error format: { type: "error", error: { type, message } }
+    // Uses ?? (nullish coalescing) intentionally — preserves explicit empty-string types from fixtures.
     const anthropicError = {
       type: "error",
       error: {
@@ -526,6 +561,9 @@ export async function handleBedrock(
 
   // Tool call response
   if (isToolCallResponse(response)) {
+    if ("webSearches" in response) {
+      logger.warn("webSearches in fixture response are not supported for Bedrock API — ignoring");
+    }
     const overrides = extractOverrides(response);
     journal.add({
       method: req.method ?? "POST",
@@ -938,7 +976,8 @@ export async function handleBedrockStream(
     return;
   }
 
-  const completionReq = bedrockToCompletionRequest(bedrockReq, modelId);
+  const completionReq = bedrockToCompletionRequest(bedrockReq, modelId, logger);
+  completionReq.stream = true;
   completionReq._endpointType = "chat";
 
   const testId = getTestId(req);
@@ -1042,7 +1081,8 @@ export async function handleBedrockStream(
       body: completionReq,
       response: { status, fixture },
     });
-    // Anthropic-style error format (Bedrock uses Claude): { type: "error", error: { type, message } }
+    // Bedrock Claude error format: { type: "error", error: { type, message } }
+    // Uses ?? (nullish coalescing) intentionally — preserves explicit empty-string types from fixtures.
     const anthropicError = {
       type: "error",
       error: {
@@ -1130,6 +1170,9 @@ export async function handleBedrockStream(
 
   // Tool call response — stream as Event Stream
   if (isToolCallResponse(response)) {
+    if ("webSearches" in response) {
+      logger.warn("webSearches in fixture response are not supported for Bedrock API — ignoring");
+    }
     const overrides = extractOverrides(response);
     const journalEntry = journal.add({
       method: req.method ?? "POST",
