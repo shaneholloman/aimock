@@ -495,9 +495,8 @@ describe("POST /model/{id}/invoke-with-response-stream (reasoning streaming)", (
 
     const thinkingDeltas = frames.filter(
       (f) =>
-        f.eventType === "contentBlockDelta" &&
-        (f.payload as { contentBlockDelta?: { delta?: { type?: string } } }).contentBlockDelta
-          ?.delta?.type === "thinking_delta",
+        (f.payload as { type?: string }).type === "content_block_delta" &&
+        (f.payload as { delta?: { type?: string } }).delta?.type === "thinking_delta",
     );
     expect(thinkingDeltas).toHaveLength(0);
   });
