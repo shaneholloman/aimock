@@ -433,23 +433,22 @@ describe("POST /model/{id}/invoke-with-response-stream (reasoning streaming)", (
 
     expect(res.status).toBe(200);
     const frames = decodeEventStreamFrames(res.body);
-    const eventTypes = frames.map((f) => f.eventType);
+    const payloadTypes = frames.map((f) => (f.payload as { type?: string }).type);
 
-    // Should start with messageStart
-    expect(eventTypes[0]).toBe("messageStart");
+    // Should start with an Anthropic-native message_start payload inside a Bedrock chunk frame.
+    expect(frames[0].eventType).toBe("chunk");
+    expect(payloadTypes[0]).toBe("message_start");
 
     // Find thinking and text block starts
     const thinkingStartIdx = frames.findIndex(
       (f) =>
-        f.eventType === "contentBlockStart" &&
-        (f.payload as { contentBlockStart?: { start?: { type?: string } } }).contentBlockStart
-          ?.start?.type === "thinking",
+        (f.payload as { type?: string }).type === "content_block_start" &&
+        (f.payload as { content_block?: { type?: string } }).content_block?.type === "thinking",
     );
     const textStartIdx = frames.findIndex(
       (f) =>
-        f.eventType === "contentBlockStart" &&
-        (f.payload as { contentBlockStart?: { start?: { type?: string } } }).contentBlockStart
-          ?.start?.type === "text",
+        (f.payload as { type?: string }).type === "content_block_start" &&
+        (f.payload as { content_block?: { type?: string } }).content_block?.type === "text",
     );
 
     expect(thinkingStartIdx).toBeGreaterThan(0);
@@ -458,37 +457,27 @@ describe("POST /model/{id}/invoke-with-response-stream (reasoning streaming)", (
     // Verify thinking content
     const thinkingDeltas = frames.filter(
       (f) =>
-        f.eventType === "contentBlockDelta" &&
-        (f.payload as { contentBlockDelta?: { delta?: { type?: string } } }).contentBlockDelta
-          ?.delta?.type === "thinking_delta",
+        (f.payload as { type?: string }).type === "content_block_delta" &&
+        (f.payload as { delta?: { type?: string } }).delta?.type === "thinking_delta",
     );
     const fullThinking = thinkingDeltas
-      .map(
-        (f) =>
-          (f.payload as { contentBlockDelta: { delta: { thinking: string } } }).contentBlockDelta
-            .delta.thinking,
-      )
+      .map((f) => (f.payload as { delta: { thinking: string } }).delta.thinking)
       .join("");
     expect(fullThinking).toBe("Let me think step by step about this problem.");
 
     // Verify text content
     const textDeltas = frames.filter(
       (f) =>
-        f.eventType === "contentBlockDelta" &&
-        typeof (f.payload as { contentBlockDelta?: { delta?: { text?: string } } })
-          .contentBlockDelta?.delta?.text === "string",
+        (f.payload as { type?: string }).type === "content_block_delta" &&
+        typeof (f.payload as { delta?: { text?: string } }).delta?.text === "string",
     );
     const fullText = textDeltas
-      .map(
-        (f) =>
-          (f.payload as { contentBlockDelta: { delta: { text: string } } }).contentBlockDelta.delta
-            .text,
-      )
+      .map((f) => (f.payload as { delta: { text: string } }).delta.text)
       .join("");
     expect(fullText).toBe("The answer is 42.");
 
-    // Should end with messageStop
-    expect(eventTypes[eventTypes.length - 1]).toBe("messageStop");
+    // Should end with message_stop
+    expect(payloadTypes[payloadTypes.length - 1]).toBe("message_stop");
   });
 
   it("no thinking block when reasoning is absent", async () => {
@@ -506,9 +495,8 @@ describe("POST /model/{id}/invoke-with-response-stream (reasoning streaming)", (
 
     const thinkingDeltas = frames.filter(
       (f) =>
-        f.eventType === "contentBlockDelta" &&
-        (f.payload as { contentBlockDelta?: { delta?: { type?: string } } }).contentBlockDelta
-          ?.delta?.type === "thinking_delta",
+        (f.payload as { type?: string }).type === "content_block_delta" &&
+        (f.payload as { delta?: { type?: string } }).delta?.type === "thinking_delta",
     );
     expect(thinkingDeltas).toHaveLength(0);
   });
@@ -744,76 +732,73 @@ describe("POST /api/generate (reasoning streaming)", () => {
 
 describe("buildBedrockStreamTextEvents (reasoning)", () => {
   it("emits thinking block events before text block events", () => {
-    const events = buildBedrockStreamTextEvents("The answer.", 100, "Step by step.");
-    const types = events.map((e) => e.eventType);
+    const events = buildBedrockStreamTextEvents("The answer.", "model-id", 100, "Step by step.");
+    const types = events.map((e) => (e.payload as { type: string }).type);
 
-    // messageStart → thinking block → text block → messageStop
-    expect(types[0]).toBe("messageStart");
+    // message_start → thinking block → text block → message_delta → message_stop
+    expect(events.every((event) => event.eventType === "chunk")).toBe(true);
+    expect(types[0]).toBe("message_start");
 
     // Thinking block at index 0
     expect(events[1]).toEqual({
-      eventType: "contentBlockStart",
+      eventType: "chunk",
       payload: {
-        contentBlockIndex: 0,
-        contentBlockStart: { contentBlockIndex: 0, start: { type: "thinking" } },
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "" },
       },
     });
     expect(events[2]).toEqual({
-      eventType: "contentBlockDelta",
+      eventType: "chunk",
       payload: {
-        contentBlockIndex: 0,
-        contentBlockDelta: {
-          contentBlockIndex: 0,
-          delta: { type: "thinking_delta", thinking: "Step by step." },
-        },
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "Step by step." },
       },
     });
     expect(events[3]).toEqual({
-      eventType: "contentBlockStop",
-      payload: { contentBlockIndex: 0 },
+      eventType: "chunk",
+      payload: { type: "content_block_stop", index: 0 },
     });
 
     // Text block at index 1
     expect(events[4]).toEqual({
-      eventType: "contentBlockStart",
+      eventType: "chunk",
       payload: {
-        contentBlockIndex: 1,
-        contentBlockStart: { contentBlockIndex: 1, start: { type: "text" } },
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "text", text: "" },
       },
     });
     expect(events[5]).toEqual({
-      eventType: "contentBlockDelta",
+      eventType: "chunk",
       payload: {
-        contentBlockIndex: 1,
-        contentBlockDelta: {
-          contentBlockIndex: 1,
-          delta: { type: "text_delta", text: "The answer." },
-        },
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "text_delta", text: "The answer." },
       },
     });
     expect(events[6]).toEqual({
-      eventType: "contentBlockStop",
-      payload: { contentBlockIndex: 1 },
+      eventType: "chunk",
+      payload: { type: "content_block_stop", index: 1 },
     });
 
-    expect(events[7]).toEqual({
-      eventType: "messageStop",
-      payload: { stopReason: "end_turn" },
-    });
+    expect(types.slice(7)).toEqual(["message_delta", "message_stop"]);
   });
 
   it("no thinking block when reasoning is absent", () => {
-    const events = buildBedrockStreamTextEvents("Hello.", 100);
-    const types = events.map((e) => e.eventType);
+    const events = buildBedrockStreamTextEvents("Hello.", "model-id", 100);
+    const types = events.map((e) => (e.payload as { type: string }).type);
 
-    // messageStart → text block at index 0 → messageStop
+    // message_start → text block at index 0 → message_delta → message_stop
     expect(types).toEqual([
-      "messageStart",
-      "contentBlockStart",
-      "contentBlockDelta",
-      "contentBlockStop",
-      "messageStop",
+      "message_start",
+      "content_block_start",
+      "content_block_delta",
+      "content_block_stop",
+      "message_delta",
+      "message_stop",
     ]);
-    expect((events[1].payload as { contentBlockIndex: number }).contentBlockIndex).toBe(0);
+    expect((events[1].payload as { index: number }).index).toBe(0);
   });
 });

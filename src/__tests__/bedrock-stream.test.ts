@@ -227,7 +227,25 @@ const errorFixture: Fixture = {
   },
 };
 
-const allFixtures: Fixture[] = [textFixture, toolFixture, errorFixture];
+const contentWithToolCallsFixture: Fixture = {
+  match: { userMessage: "search-and-explain" },
+  response: {
+    content: "Let me look that up.",
+    toolCalls: [
+      {
+        name: "web_search",
+        arguments: '{"query":"vitest testing"}',
+      },
+    ],
+  },
+};
+
+const allFixtures: Fixture[] = [
+  textFixture,
+  toolFixture,
+  errorFixture,
+  contentWithToolCallsFixture,
+];
 
 // --- test lifecycle ---
 
@@ -261,38 +279,47 @@ describe("POST /model/{modelId}/invoke-with-response-stream", () => {
     const frames = parseFrames(res.body);
     expect(frames.length).toBeGreaterThanOrEqual(5);
 
-    // messageStart
-    expect(frames[0].eventType).toBe("messageStart");
-    expect(frames[0].payload).toEqual({ messageStart: { role: "assistant" } });
+    // InvokeModelWithResponseStream wraps Anthropic-native stream events in Bedrock
+    // EventStream chunk frames.
+    expect(frames[0].eventType).toBe("chunk");
+    expect(frames[0].payload).toMatchObject({
+      type: "message_start",
+      message: { role: "assistant", model: MODEL_ID },
+    });
 
-    // contentBlockStart
-    expect(frames[1].eventType).toBe("contentBlockStart");
+    expect(frames[1].eventType).toBe("chunk");
     expect(frames[1].payload).toEqual({
-      contentBlockIndex: 0,
-      contentBlockStart: { contentBlockIndex: 0, start: { type: "text" } },
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
     });
 
     // Content delta(s) — collect text
-    const deltas = frames.filter((f) => f.eventType === "contentBlockDelta");
+    const deltas = frames.filter(
+      (f) => (f.payload as { type?: string }).type === "content_block_delta",
+    );
     expect(deltas.length).toBeGreaterThanOrEqual(1);
     const fullText = deltas
-      .map(
-        (f) =>
-          (f.payload as { contentBlockDelta: { delta: { text: string } } }).contentBlockDelta.delta
-            .text,
-      )
+      .map((f) => (f.payload as { delta: { text: string } }).delta.text)
       .join("");
     expect(fullText).toBe("Hi there!");
 
-    // contentBlockStop
-    const stopBlock = frames.find((f) => f.eventType === "contentBlockStop");
+    // content_block_stop
+    const stopBlock = frames.find(
+      (f) => (f.payload as { type?: string }).type === "content_block_stop",
+    );
     expect(stopBlock).toBeDefined();
-    expect(stopBlock!.payload).toEqual({ contentBlockIndex: 0 });
+    expect(stopBlock!.payload).toEqual({ type: "content_block_stop", index: 0 });
 
-    // messageStop
-    const msgStop = frames.find((f) => f.eventType === "messageStop");
+    // message_delta/message_stop
+    const msgDelta = frames.find((f) => (f.payload as { type?: string }).type === "message_delta");
+    expect(msgDelta).toBeDefined();
+    expect(msgDelta!.payload).toMatchObject({
+      type: "message_delta",
+      delta: { stop_reason: "end_turn" },
+    });
+    const msgStop = frames.find((f) => (f.payload as { type?: string }).type === "message_stop");
     expect(msgStop).toBeDefined();
-    expect(msgStop!.payload).toEqual({ stopReason: "end_turn" });
   });
 
   it("returns tool call response as binary Event Stream frames", async () => {
@@ -306,38 +333,38 @@ describe("POST /model/{modelId}/invoke-with-response-stream", () => {
     expect(res.status).toBe(200);
     const frames = parseFrames(res.body);
 
-    // messageStart
-    expect(frames[0].eventType).toBe("messageStart");
-    expect(frames[0].payload).toEqual({ messageStart: { role: "assistant" } });
+    expect(frames[0].eventType).toBe("chunk");
+    expect(frames[0].payload).toMatchObject({ type: "message_start" });
 
-    // contentBlockStart with toolUse
-    expect(frames[1].eventType).toBe("contentBlockStart");
+    // content_block_start with tool_use
+    expect(frames[1].eventType).toBe("chunk");
     const startPayload = frames[1].payload as {
-      contentBlockIndex: number;
-      contentBlockStart: {
-        contentBlockIndex: number;
-        start: { toolUse: { toolUseId: string; name: string } };
-      };
+      type: string;
+      index: number;
+      content_block: { type: string; id: string; name: string; input: object };
     };
-    expect(startPayload.contentBlockIndex).toBe(0);
-    expect(startPayload.contentBlockStart.start.toolUse.name).toBe("get_weather");
-    expect(startPayload.contentBlockStart.start.toolUse.toolUseId).toBeDefined();
+    expect(startPayload).toMatchObject({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "tool_use", name: "get_weather", input: {} },
+    });
+    expect(startPayload.content_block.id).toBeDefined();
 
-    // contentBlockDelta(s) with toolUse input
-    const deltas = frames.filter((f) => f.eventType === "contentBlockDelta");
+    // content_block_delta(s) with input_json_delta
+    const deltas = frames.filter(
+      (f) => (f.payload as { type?: string }).type === "content_block_delta",
+    );
     expect(deltas.length).toBeGreaterThanOrEqual(1);
     const fullJson = deltas
-      .map(
-        (f) =>
-          (f.payload as { contentBlockDelta: { delta: { toolUse: { input: string } } } })
-            .contentBlockDelta.delta.toolUse.input,
-      )
+      .map((f) => (f.payload as { delta: { partial_json: string } }).delta.partial_json)
       .join("");
     expect(JSON.parse(fullJson)).toEqual({ city: "SF" });
 
-    // messageStop
-    const msgStop = frames.find((f) => f.eventType === "messageStop");
-    expect(msgStop!.payload).toEqual({ stopReason: "tool_use" });
+    const msgDelta = frames.find((f) => (f.payload as { type?: string }).type === "message_delta");
+    expect(msgDelta!.payload).toMatchObject({
+      type: "message_delta",
+      delta: { stop_reason: "tool_use" },
+    });
   });
 
   it("Content-Type is application/vnd.amazon.eventstream", async () => {
@@ -467,41 +494,131 @@ describe("POST /model/{modelId}/invoke-with-response-stream (multiple tool calls
     expect(res.status).toBe(200);
     const frames = parseFrames(res.body);
 
-    // Find contentBlockStart frames
-    const blockStarts = frames.filter((f) => f.eventType === "contentBlockStart");
+    // Find content_block_start frames
+    const blockStarts = frames.filter(
+      (f) => (f.payload as { type?: string }).type === "content_block_start",
+    );
     expect(blockStarts.length).toBeGreaterThanOrEqual(2);
 
-    // First tool at contentBlockIndex 0
+    // First tool at index 0
     const start0 = blockStarts[0].payload as {
-      contentBlockIndex: number;
-      contentBlockStart: {
-        contentBlockIndex: number;
-        start: { toolUse: { name: string } };
-      };
+      index: number;
+      content_block: { name: string };
     };
-    expect(start0.contentBlockIndex).toBe(0);
-    expect(start0.contentBlockStart.start.toolUse.name).toBe("get_weather");
+    expect(start0.index).toBe(0);
+    expect(start0.content_block.name).toBe("get_weather");
 
-    // Second tool at contentBlockIndex 1
+    // Second tool at index 1
     const start1 = blockStarts[1].payload as {
-      contentBlockIndex: number;
-      contentBlockStart: {
-        contentBlockIndex: number;
-        start: { toolUse: { name: string } };
-      };
+      index: number;
+      content_block: { name: string };
     };
-    expect(start1.contentBlockIndex).toBe(1);
-    expect(start1.contentBlockStart.start.toolUse.name).toBe("get_time");
+    expect(start1.index).toBe(1);
+    expect(start1.content_block.name).toBe("get_time");
 
-    // contentBlockStop should also have correct indices
-    const blockStops = frames.filter((f) => f.eventType === "contentBlockStop");
+    // content_block_stop should also have correct indices
+    const blockStops = frames.filter(
+      (f) => (f.payload as { type?: string }).type === "content_block_stop",
+    );
     expect(blockStops.length).toBeGreaterThanOrEqual(2);
-    expect((blockStops[0].payload as { contentBlockIndex: number }).contentBlockIndex).toBe(0);
-    expect((blockStops[1].payload as { contentBlockIndex: number }).contentBlockIndex).toBe(1);
+    expect((blockStops[0].payload as { index: number }).index).toBe(0);
+    expect((blockStops[1].payload as { index: number }).index).toBe(1);
 
-    // messageStop should indicate tool_use
-    const msgStop = frames.find((f) => f.eventType === "messageStop");
-    expect(msgStop!.payload).toEqual({ stopReason: "tool_use" });
+    // message_delta should indicate tool_use
+    const msgDelta = frames.find((f) => (f.payload as { type?: string }).type === "message_delta");
+    expect(msgDelta!.payload).toMatchObject({ delta: { stop_reason: "tool_use" } });
+  });
+});
+
+// ─── invoke-with-response-stream: content + tool calls ────────────────────
+
+describe("POST /model/{modelId}/invoke-with-response-stream (content + toolCalls)", () => {
+  const MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0";
+
+  it("streams text block followed by tool_use block in Anthropic-native format", async () => {
+    instance = await createServer(allFixtures);
+    const res = await postBinary(`${instance.url}/model/${MODEL_ID}/invoke-with-response-stream`, {
+      anthropic_version: "bedrock-2023-05-31",
+      max_tokens: 512,
+      messages: [{ role: "user", content: "search-and-explain" }],
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/vnd.amazon.eventstream");
+
+    const frames = parseFrames(res.body);
+
+    // All frames should be "chunk" eventType (Anthropic-native wrapping)
+    expect(frames.every((f) => f.eventType === "chunk")).toBe(true);
+
+    // message_start
+    expect(frames[0].payload).toMatchObject({
+      type: "message_start",
+      message: { role: "assistant", model: MODEL_ID },
+    });
+
+    // Text content_block_start at index 0
+    const textBlockStart = frames.find(
+      (f) =>
+        (f.payload as { type?: string }).type === "content_block_start" &&
+        (f.payload as { content_block?: { type: string } }).content_block?.type === "text",
+    );
+    expect(textBlockStart).toBeDefined();
+    expect(textBlockStart!.payload).toMatchObject({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+
+    // Text deltas — collect and verify full text
+    const textDeltas = frames.filter(
+      (f) =>
+        (f.payload as { type?: string }).type === "content_block_delta" &&
+        (f.payload as { delta?: { type?: string } }).delta?.type === "text_delta",
+    );
+    expect(textDeltas.length).toBeGreaterThanOrEqual(1);
+    const fullText = textDeltas
+      .map((f) => (f.payload as { delta: { text: string } }).delta.text)
+      .join("");
+    expect(fullText).toBe("Let me look that up.");
+
+    // Tool use content_block_start at index 1
+    const toolBlockStart = frames.find(
+      (f) =>
+        (f.payload as { type?: string }).type === "content_block_start" &&
+        (f.payload as { content_block?: { type: string } }).content_block?.type === "tool_use",
+    );
+    expect(toolBlockStart).toBeDefined();
+    const toolStartPayload = toolBlockStart!.payload as {
+      index: number;
+      content_block: { type: string; id: string; name: string; input: object };
+    };
+    expect(toolStartPayload.index).toBe(1);
+    expect(toolStartPayload.content_block.name).toBe("web_search");
+    expect(toolStartPayload.content_block.id).toBeDefined();
+
+    // Tool deltas — input_json_delta with partial_json
+    const toolDeltas = frames.filter(
+      (f) =>
+        (f.payload as { type?: string }).type === "content_block_delta" &&
+        (f.payload as { delta?: { type?: string } }).delta?.type === "input_json_delta",
+    );
+    expect(toolDeltas.length).toBeGreaterThanOrEqual(1);
+    const fullJson = toolDeltas
+      .map((f) => (f.payload as { delta: { partial_json: string } }).delta.partial_json)
+      .join("");
+    expect(JSON.parse(fullJson)).toEqual({ query: "vitest testing" });
+
+    // message_delta with stop_reason "tool_use"
+    const msgDelta = frames.find((f) => (f.payload as { type?: string }).type === "message_delta");
+    expect(msgDelta!.payload).toMatchObject({
+      type: "message_delta",
+      delta: { stop_reason: "tool_use" },
+    });
+
+    // message_stop
+    const msgStop = frames.find((f) => (f.payload as { type?: string }).type === "message_stop");
+    expect(msgStop).toBeDefined();
   });
 });
 
@@ -743,6 +860,93 @@ describe("POST /model/{modelId}/converse-stream", () => {
     });
 
     expect(res.status).toBe(500);
+  });
+});
+
+// ─── converse-stream: content + tool calls ─────────────────────────────────
+
+describe("POST /model/{modelId}/converse-stream (content + toolCalls)", () => {
+  const MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0";
+
+  it("streams text block followed by toolUse block in Converse camelCase format", async () => {
+    instance = await createServer(allFixtures);
+    const res = await postBinary(`${instance.url}/model/${MODEL_ID}/converse-stream`, {
+      messages: [{ role: "user", content: [{ text: "search-and-explain" }] }],
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/vnd.amazon.eventstream");
+
+    const frames = parseFrames(res.body);
+
+    // messageStart
+    expect(frames[0].eventType).toBe("messageStart");
+    expect(frames[0].payload).toEqual({ messageStart: { role: "assistant" } });
+
+    // Text contentBlockStart
+    const textBlockStart = frames.find(
+      (f) =>
+        f.eventType === "contentBlockStart" &&
+        (f.payload as { contentBlockStart?: { start?: { type?: string } } }).contentBlockStart
+          ?.start?.type === "text",
+    );
+    expect(textBlockStart).toBeDefined();
+
+    // Text deltas
+    const textDeltas = frames.filter(
+      (f) =>
+        f.eventType === "contentBlockDelta" &&
+        (f.payload as { contentBlockDelta?: { delta?: { text?: string } } }).contentBlockDelta
+          ?.delta?.text !== undefined,
+    );
+    expect(textDeltas.length).toBeGreaterThanOrEqual(1);
+    const fullText = textDeltas
+      .map(
+        (f) =>
+          (f.payload as { contentBlockDelta: { delta: { text: string } } }).contentBlockDelta.delta
+            .text,
+      )
+      .join("");
+    expect(fullText).toBe("Let me look that up.");
+
+    // Tool use contentBlockStart
+    const toolBlockStart = frames.find(
+      (f) =>
+        f.eventType === "contentBlockStart" &&
+        (f.payload as { contentBlockStart?: { start?: { toolUse?: unknown } } }).contentBlockStart
+          ?.start?.toolUse !== undefined,
+    );
+    expect(toolBlockStart).toBeDefined();
+    const toolStartPayload = toolBlockStart!.payload as {
+      contentBlockIndex: number;
+      contentBlockStart: {
+        contentBlockIndex: number;
+        start: { toolUse: { toolUseId: string; name: string } };
+      };
+    };
+    expect(toolStartPayload.contentBlockStart.start.toolUse.name).toBe("web_search");
+    expect(toolStartPayload.contentBlockStart.start.toolUse.toolUseId).toBeDefined();
+
+    // Tool deltas — toolUse.input
+    const toolDeltas = frames.filter(
+      (f) =>
+        f.eventType === "contentBlockDelta" &&
+        (f.payload as { contentBlockDelta?: { delta?: { toolUse?: unknown } } }).contentBlockDelta
+          ?.delta?.toolUse !== undefined,
+    );
+    expect(toolDeltas.length).toBeGreaterThanOrEqual(1);
+    const fullJson = toolDeltas
+      .map(
+        (f) =>
+          (f.payload as { contentBlockDelta: { delta: { toolUse: { input: string } } } })
+            .contentBlockDelta.delta.toolUse.input,
+      )
+      .join("");
+    expect(JSON.parse(fullJson)).toEqual({ query: "vitest testing" });
+
+    // messageStop with tool_use stop reason
+    const msgStop = frames.find((f) => f.eventType === "messageStop");
+    expect(msgStop!.payload).toEqual({ stopReason: "tool_use" });
   });
 });
 
@@ -1025,15 +1229,12 @@ describe("POST /model/{modelId}/invoke-with-response-stream (malformed tool args
     expect(res.status).toBe(200);
     const frames = parseFrames(res.body);
 
-    // Find contentBlockDelta frames with toolUse input
-    const deltas = frames.filter((f) => f.eventType === "contentBlockDelta");
+    // Find Anthropic-native content_block_delta frames with input_json_delta
+    const deltas = frames.filter(
+      (f) => (f.payload as { type?: string }).type === "content_block_delta",
+    );
     const fullJson = deltas
-      .map((f) => {
-        const payload = f.payload as {
-          contentBlockDelta: { delta: { toolUse?: { input: string } } };
-        };
-        return payload.contentBlockDelta.delta.toolUse?.input ?? "";
-      })
+      .map((f) => (f.payload as { delta: { partial_json?: string } }).delta.partial_json ?? "")
       .join("");
     // Malformed arguments should fall back to "{}"
     expect(fullJson).toBe("{}");
@@ -1060,14 +1261,24 @@ describe("POST /model/{modelId}/invoke-with-response-stream (empty content)", ()
     expect(res.status).toBe(200);
     const frames = parseFrames(res.body);
 
-    // Should still have messageStart, contentBlockStart, contentBlockStop, messageStop
-    expect(frames[0].eventType).toBe("messageStart");
-    expect(frames.find((f) => f.eventType === "contentBlockStart")).toBeDefined();
-    expect(frames.find((f) => f.eventType === "contentBlockStop")).toBeDefined();
-    expect(frames.find((f) => f.eventType === "messageStop")).toBeDefined();
+    // Should still have message_start, content_block_start, content_block_stop, message_stop
+    // payloads inside Bedrock EventStream chunk frames.
+    expect(frames[0].eventType).toBe("chunk");
+    expect(frames[0].payload).toMatchObject({ type: "message_start" });
+    expect(
+      frames.find((f) => (f.payload as { type?: string }).type === "content_block_start"),
+    ).toBeDefined();
+    expect(
+      frames.find((f) => (f.payload as { type?: string }).type === "content_block_stop"),
+    ).toBeDefined();
+    expect(
+      frames.find((f) => (f.payload as { type?: string }).type === "message_stop"),
+    ).toBeDefined();
 
     // Content deltas should be zero (empty string → no chunks)
-    const deltas = frames.filter((f) => f.eventType === "contentBlockDelta");
+    const deltas = frames.filter(
+      (f) => (f.payload as { type?: string }).type === "content_block_delta",
+    );
     expect(deltas).toHaveLength(0);
   });
 });

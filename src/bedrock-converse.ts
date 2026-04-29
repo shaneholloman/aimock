@@ -35,11 +35,6 @@ import type { Journal } from "./journal.js";
 import type { Logger } from "./logger.js";
 import { applyChaos } from "./chaos.js";
 import { proxyAndRecord } from "./recorder.js";
-import {
-  buildBedrockStreamTextEvents,
-  buildBedrockStreamToolCallEvents,
-  buildBedrockStreamContentWithToolCallsEvents,
-} from "./bedrock.js";
 
 // ─── Converse request types ─────────────────────────────────────────────────
 
@@ -89,6 +84,175 @@ function converseUsage(overrides?: ResponseOverrides): {
   const inputTokens = overrides.usage.input_tokens ?? overrides.usage.prompt_tokens ?? 0;
   const outputTokens = overrides.usage.output_tokens ?? overrides.usage.completion_tokens ?? 0;
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+}
+
+function parseConverseToolArgumentsForStream(toolCall: ToolCall, logger: Logger): string {
+  try {
+    const parsed = JSON.parse(toolCall.arguments || "{}");
+    return JSON.stringify(parsed);
+  } catch {
+    logger.warn(
+      `Malformed JSON in fixture tool call arguments for "${toolCall.name}": ${toolCall.arguments}`,
+    );
+    return "{}";
+  }
+}
+
+function buildBedrockStreamTextEvents(
+  content: string,
+  chunkSize: number,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
+): Array<{ eventType: string; payload: object }> {
+  const events: Array<{ eventType: string; payload: object }> = [
+    { eventType: "messageStart", payload: { messageStart: { role: "assistant" } } },
+  ];
+
+  if (reasoning) {
+    const blockIndex = 0;
+    events.push({
+      eventType: "contentBlockStart",
+      payload: {
+        contentBlockIndex: blockIndex,
+        contentBlockStart: { contentBlockIndex: blockIndex, start: { type: "thinking" } },
+      },
+    });
+    for (let i = 0; i < reasoning.length; i += chunkSize) {
+      events.push({
+        eventType: "contentBlockDelta",
+        payload: {
+          contentBlockIndex: blockIndex,
+          contentBlockDelta: {
+            contentBlockIndex: blockIndex,
+            delta: { type: "thinking_delta", thinking: reasoning.slice(i, i + chunkSize) },
+          },
+        },
+      });
+    }
+    events.push({ eventType: "contentBlockStop", payload: { contentBlockIndex: blockIndex } });
+  }
+
+  const textBlockIndex = reasoning ? 1 : 0;
+  events.push({
+    eventType: "contentBlockStart",
+    payload: {
+      contentBlockIndex: textBlockIndex,
+      contentBlockStart: { contentBlockIndex: textBlockIndex, start: { type: "text" } },
+    },
+  });
+  for (let i = 0; i < content.length; i += chunkSize) {
+    events.push({
+      eventType: "contentBlockDelta",
+      payload: {
+        contentBlockIndex: textBlockIndex,
+        contentBlockDelta: {
+          contentBlockIndex: textBlockIndex,
+          delta: { type: "text_delta", text: content.slice(i, i + chunkSize) },
+        },
+      },
+    });
+  }
+  events.push({ eventType: "contentBlockStop", payload: { contentBlockIndex: textBlockIndex } });
+  events.push({
+    eventType: "messageStop",
+    payload: { stopReason: converseStopReason(overrides?.finishReason, "end_turn") },
+  });
+  return events;
+}
+
+function buildBedrockStreamContentWithToolCallsEvents(
+  content: string,
+  toolCalls: ToolCall[],
+  chunkSize: number,
+  logger: Logger,
+  reasoning?: string,
+  overrides?: ResponseOverrides,
+): Array<{ eventType: string; payload: object }> {
+  const events = buildBedrockStreamTextEvents(content, chunkSize, reasoning, {
+    ...overrides,
+    finishReason: "stop",
+  });
+  events.pop();
+  let blockIndex = reasoning ? 2 : 1;
+
+  for (const tc of toolCalls) {
+    const toolUseId = tc.id || generateToolUseId();
+    events.push({
+      eventType: "contentBlockStart",
+      payload: {
+        contentBlockIndex: blockIndex,
+        contentBlockStart: {
+          contentBlockIndex: blockIndex,
+          start: { toolUse: { toolUseId, name: tc.name } },
+        },
+      },
+    });
+    const argsStr = parseConverseToolArgumentsForStream(tc, logger);
+    for (let i = 0; i < argsStr.length; i += chunkSize) {
+      events.push({
+        eventType: "contentBlockDelta",
+        payload: {
+          contentBlockIndex: blockIndex,
+          contentBlockDelta: {
+            contentBlockIndex: blockIndex,
+            delta: { toolUse: { input: argsStr.slice(i, i + chunkSize) } },
+          },
+        },
+      });
+    }
+    events.push({ eventType: "contentBlockStop", payload: { contentBlockIndex: blockIndex } });
+    blockIndex++;
+  }
+  events.push({
+    eventType: "messageStop",
+    payload: { stopReason: converseStopReason(overrides?.finishReason, "tool_use") },
+  });
+  return events;
+}
+
+function buildBedrockStreamToolCallEvents(
+  toolCalls: ToolCall[],
+  chunkSize: number,
+  logger: Logger,
+  overrides?: ResponseOverrides,
+): Array<{ eventType: string; payload: object }> {
+  const events: Array<{ eventType: string; payload: object }> = [
+    { eventType: "messageStart", payload: { messageStart: { role: "assistant" } } },
+  ];
+
+  for (let tcIdx = 0; tcIdx < toolCalls.length; tcIdx++) {
+    const tc = toolCalls[tcIdx];
+    const toolUseId = tc.id || generateToolUseId();
+    events.push({
+      eventType: "contentBlockStart",
+      payload: {
+        contentBlockIndex: tcIdx,
+        contentBlockStart: {
+          contentBlockIndex: tcIdx,
+          start: { toolUse: { toolUseId, name: tc.name } },
+        },
+      },
+    });
+    const argsStr = parseConverseToolArgumentsForStream(tc, logger);
+    for (let i = 0; i < argsStr.length; i += chunkSize) {
+      events.push({
+        eventType: "contentBlockDelta",
+        payload: {
+          contentBlockIndex: tcIdx,
+          contentBlockDelta: {
+            contentBlockIndex: tcIdx,
+            delta: { toolUse: { input: argsStr.slice(i, i + chunkSize) } },
+          },
+        },
+      });
+    }
+    events.push({ eventType: "contentBlockStop", payload: { contentBlockIndex: tcIdx } });
+  }
+  events.push({
+    eventType: "messageStop",
+    payload: { stopReason: converseStopReason(overrides?.finishReason, "tool_use") },
+  });
+  return events;
 }
 
 // ─── Input conversion: Converse → ChatCompletionRequest ─────────────────────

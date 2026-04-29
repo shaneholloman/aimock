@@ -1448,31 +1448,29 @@ import { buildBedrockStreamTextEvents, buildBedrockStreamToolCallEvents } from "
 
 describe("buildBedrockStreamTextEvents", () => {
   it("creates correct event sequence for empty content", () => {
-    const events = buildBedrockStreamTextEvents("", 10);
-    // Should have: messageStart, contentBlockStart, contentBlockStop, messageStop (no deltas)
-    expect(events).toHaveLength(4);
-    expect(events[0].eventType).toBe("messageStart");
-    expect(events[1].eventType).toBe("contentBlockStart");
-    expect(events[2].eventType).toBe("contentBlockStop");
-    expect(events[3].eventType).toBe("messageStop");
+    const events = buildBedrockStreamTextEvents("", "model-id", 10);
+    // Should have: message_start, content_block_start, content_block_stop,
+    // message_delta, message_stop (no deltas), all wrapped in chunk events.
+    expect(events).toHaveLength(5);
+    expect(events.every((event) => event.eventType === "chunk")).toBe(true);
+    expect(events.map((event) => (event.payload as { type: string }).type)).toEqual([
+      "message_start",
+      "content_block_start",
+      "content_block_stop",
+      "message_delta",
+      "message_stop",
+    ]);
   });
 
   it("chunks content according to chunkSize", () => {
-    const events = buildBedrockStreamTextEvents("ABCDEF", 2);
-    const deltas = events.filter((e) => e.eventType === "contentBlockDelta");
+    const events = buildBedrockStreamTextEvents("ABCDEF", "model-id", 2);
+    const deltas = events.filter(
+      (e) => (e.payload as { type?: string }).type === "content_block_delta",
+    );
     expect(deltas).toHaveLength(3);
-    expect(
-      (deltas[0].payload as { contentBlockDelta: { delta: { text: string } } }).contentBlockDelta
-        .delta.text,
-    ).toBe("AB");
-    expect(
-      (deltas[1].payload as { contentBlockDelta: { delta: { text: string } } }).contentBlockDelta
-        .delta.text,
-    ).toBe("CD");
-    expect(
-      (deltas[2].payload as { contentBlockDelta: { delta: { text: string } } }).contentBlockDelta
-        .delta.text,
-    ).toBe("EF");
+    expect((deltas[0].payload as { delta: { text: string } }).delta.text).toBe("AB");
+    expect((deltas[1].payload as { delta: { text: string } }).delta.text).toBe("CD");
+    expect((deltas[2].payload as { delta: { text: string } }).delta.text).toBe("EF");
   });
 });
 
@@ -1482,16 +1480,15 @@ describe("buildBedrockStreamToolCallEvents", () => {
   it("falls back to '{}' for malformed JSON arguments", () => {
     const events = buildBedrockStreamToolCallEvents(
       [{ name: "fn", arguments: "NOT VALID" }],
+      "model-id",
       100,
       logger,
     );
-    const deltas = events.filter((e) => e.eventType === "contentBlockDelta");
+    const deltas = events.filter(
+      (e) => (e.payload as { type?: string }).type === "content_block_delta",
+    );
     const fullJson = deltas
-      .map(
-        (e) =>
-          (e.payload as { contentBlockDelta: { delta: { toolUse: { input: string } } } })
-            .contentBlockDelta.delta.toolUse.input,
-      )
+      .map((e) => (e.payload as { delta: { partial_json: string } }).delta.partial_json)
       .join("");
     expect(fullJson).toBe("{}");
   });
@@ -1499,38 +1496,47 @@ describe("buildBedrockStreamToolCallEvents", () => {
   it("generates tool use id when not provided", () => {
     const events = buildBedrockStreamToolCallEvents(
       [{ name: "fn", arguments: '{"x":1}' }],
+      "model-id",
       100,
       logger,
     );
-    const startEvent = events.find((e) => e.eventType === "contentBlockStart");
+    const startEvent = events.find(
+      (e) => (e.payload as { type?: string }).type === "content_block_start",
+    );
     const payload = startEvent!.payload as {
-      contentBlockStart: { start: { toolUse: { toolUseId: string } } };
+      content_block: { id: string };
     };
-    expect(payload.contentBlockStart.start.toolUse.toolUseId).toMatch(/^toolu_/);
+    expect(payload.content_block.id).toMatch(/^toolu_/);
   });
 
   it("uses provided tool id", () => {
     const events = buildBedrockStreamToolCallEvents(
       [{ name: "fn", arguments: '{"x":1}', id: "custom_id" }],
+      "model-id",
       100,
       logger,
     );
-    const startEvent = events.find((e) => e.eventType === "contentBlockStart");
+    const startEvent = events.find(
+      (e) => (e.payload as { type?: string }).type === "content_block_start",
+    );
     const payload = startEvent!.payload as {
-      contentBlockStart: { start: { toolUse: { toolUseId: string } } };
+      content_block: { id: string };
     };
-    expect(payload.contentBlockStart.start.toolUse.toolUseId).toBe("custom_id");
+    expect(payload.content_block.id).toBe("custom_id");
   });
 
   it("uses '{}' when arguments is empty string", () => {
-    const events = buildBedrockStreamToolCallEvents([{ name: "fn", arguments: "" }], 100, logger);
-    const deltas = events.filter((e) => e.eventType === "contentBlockDelta");
+    const events = buildBedrockStreamToolCallEvents(
+      [{ name: "fn", arguments: "" }],
+      "model-id",
+      100,
+      logger,
+    );
+    const deltas = events.filter(
+      (e) => (e.payload as { type?: string }).type === "content_block_delta",
+    );
     const fullJson = deltas
-      .map(
-        (e) =>
-          (e.payload as { contentBlockDelta: { delta: { toolUse: { input: string } } } })
-            .contentBlockDelta.delta.toolUse.input,
-      )
+      .map((e) => (e.payload as { delta: { partial_json: string } }).delta.partial_json)
       .join("");
     expect(fullJson).toBe("{}");
   });
