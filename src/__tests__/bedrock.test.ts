@@ -1,10 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as http from "node:http";
-import type { Fixture, HandlerDefaults } from "../types.js";
+import type { Fixture } from "../types.js";
 import { createServer, type ServerInstance } from "../server.js";
 import { bedrockToCompletionRequest, handleBedrock, handleBedrockStream } from "../bedrock.js";
 import { Journal } from "../journal.js";
 import { Logger } from "../logger.js";
+import { createMockReq, createMockRes, createDefaults } from "./helpers/mock-res.js";
 
 // --- helpers ---
 
@@ -635,7 +636,7 @@ describe("bedrockToCompletionRequest (edge cases)", () => {
       },
       "model",
     );
-    expect(result.messages[0].tool_calls![0].id).toMatch(/^toolu_/);
+    expect(result.messages[0].tool_calls![0].id).toBe("tool_use_0");
   });
 
   it("handles assistant tool_use block with missing name (falls back to '')", () => {
@@ -750,8 +751,8 @@ describe("bedrockToCompletionRequest (edge cases)", () => {
       },
       "model",
     );
-    // Empty array → no tool_use blocks, textContent is "" → null
-    expect(result.messages[0]).toEqual({ role: "assistant", content: null });
+    // Empty array → no tool_use blocks, textContent is "" → preserved as "" (not coerced to null via ??)
+    expect(result.messages[0]).toEqual({ role: "assistant", content: "" });
   });
 
   it("handles user message with content blocks but no tool_results (text extraction)", () => {
@@ -995,62 +996,6 @@ describe("POST /model/{modelId}/invoke (tool call with empty arguments)", () => 
 // ---------------------------------------------------------------------------
 // Direct handler tests for req.method/req.url fallback branches
 // ---------------------------------------------------------------------------
-
-function createMockReq(overrides: Partial<http.IncomingMessage> = {}): http.IncomingMessage {
-  return {
-    method: undefined,
-    url: undefined,
-    headers: {},
-    ...overrides,
-  } as unknown as http.IncomingMessage;
-}
-
-function createMockRes(): http.ServerResponse & {
-  _written: string;
-  _status: number;
-  _headers: Record<string, string>;
-} {
-  const res = {
-    _written: "",
-    _status: 0,
-    _headers: {} as Record<string, string>,
-    writableEnded: false,
-    statusCode: 0,
-    writeHead(status: number, headers?: Record<string, string>) {
-      res._status = status;
-      res.statusCode = status;
-      if (headers) Object.assign(res._headers, headers);
-    },
-    setHeader(name: string, value: string) {
-      res._headers[name] = value;
-    },
-    write(data: string) {
-      res._written += data;
-      return true;
-    },
-    end(data?: string) {
-      if (data) res._written += data;
-      res.writableEnded = true;
-    },
-    destroy() {
-      res.writableEnded = true;
-    },
-  };
-  return res as unknown as http.ServerResponse & {
-    _written: string;
-    _status: number;
-    _headers: Record<string, string>;
-  };
-}
-
-function createDefaults(overrides: Partial<HandlerDefaults> = {}): HandlerDefaults {
-  return {
-    latency: 0,
-    chunkSize: 100,
-    logger: new Logger("silent"),
-    ...overrides,
-  };
-}
 
 describe("handleBedrock (direct handler call, method/url fallbacks)", () => {
   it("uses fallback values when req.method and req.url are undefined", async () => {
@@ -1742,11 +1687,7 @@ describe("Bedrock webSearches warning", () => {
       "anthropic.claude-3-5-sonnet-20241022-v2:0",
       [fixture],
       journal,
-      {
-        latency: 0,
-        chunkSize: 100,
-        logger,
-      } as HandlerDefaults,
+      createDefaults({ logger }),
       () => {},
     );
 

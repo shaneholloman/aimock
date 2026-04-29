@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as http from "node:http";
 import { crc32 } from "node:zlib";
 import type { Fixture } from "../types.js";
@@ -7,7 +7,7 @@ import { buildBedrockStreamTextEvents } from "../bedrock.js";
 
 // --- helpers ---
 
-let instance: ServerInstance;
+let instance: ServerInstance | null = null;
 let baseUrl: string;
 
 function post(
@@ -176,15 +176,18 @@ const allFixtures: Fixture[] = [reasoningFixture, plainFixture];
 
 // --- server lifecycle ---
 
-beforeAll(async () => {
+beforeEach(async () => {
   instance = await createServer(allFixtures);
   baseUrl = instance.url;
 });
 
-afterAll(async () => {
-  await new Promise<void>((resolve) => {
-    instance.server.close(() => resolve());
-  });
+afterEach(async () => {
+  if (instance) {
+    await new Promise<void>((resolve) => {
+      instance!.server.close(() => resolve());
+    });
+    instance = null;
+  }
 });
 
 // ─── OpenAI Chat Completions: Reasoning ─────────────────────────────────────
@@ -549,7 +552,9 @@ describe("POST /model/{id}/converse-stream (reasoning streaming)", () => {
       .join("");
     expect(fullThinking).toBe("Let me think step by step about this problem.");
 
-    expect(eventTypes[eventTypes.length - 1]).toBe("messageStop");
+    // metadata event (with usage) follows messageStop in the Converse stream
+    expect(eventTypes[eventTypes.length - 2]).toBe("messageStop");
+    expect(eventTypes[eventTypes.length - 1]).toBe("metadata");
   });
 
   it("no thinking block when reasoning is absent", async () => {
