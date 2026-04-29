@@ -77,6 +77,23 @@
           if present, its last tool message). Prior turns do not participate in matching.
         </p>
 
+        <p>
+          Two additional fields inspect the <em>full</em> message array rather than just the tail:
+        </p>
+        <ul>
+          <li>
+            <code>turnIndex</code> counts how many <code>role: "assistant"</code> messages are in
+            the request. On the first user turn (no assistant reply yet) the count is 0; after one
+            assistant reply it is 1, and so on. This is <strong>stateless</strong> &mdash; derived
+            entirely from the request content, not from a server-side counter.
+          </li>
+          <li>
+            <code>hasToolResult</code> checks whether <em>any</em> <code>role: "tool"</code> message
+            exists in the request. <code>true</code> means &ldquo;this request carries tool
+            results&rdquo;; <code>false</code> means &ldquo;no tools have executed yet.&rdquo;
+          </li>
+        </ul>
+
         <div class="info-box">
           <p>
             <strong>Substring by default, exact when transformed.</strong>
@@ -87,6 +104,104 @@
             <code>toolName</code> and <code>toolCallId</code> are always exact. This trips people up
             &mdash; see <a href="#gotchas">Gotchas</a> below.
           </p>
+        </div>
+
+        <h2>Stateless turn matching</h2>
+        <p>
+          <code>turnIndex</code> and <code>hasToolResult</code> are <strong>stateless</strong> match
+          fields added in v1.16.0. Unlike <code>sequenceIndex</code> (which uses a mutable
+          server-side counter), they derive their value from the request&rsquo;s message array. This
+          makes them safe for shared aimock instances serving multiple concurrent test runners.
+        </p>
+
+        <h3>turnIndex &mdash; match by conversation depth</h3>
+        <p>
+          <code>turnIndex</code> is the count of <code>role: "assistant"</code> messages in the
+          request. It tells you how many times the LLM has already replied in this conversation.
+        </p>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/hitl-turnindex.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"fixtures"</span>: [
+    {
+      <span class="key">"match"</span>: { <span class="key">"userMessage"</span>: <span class="str">"plan a trip"</span>, <span class="key">"turnIndex"</span>: <span class="num">0</span> },
+      <span class="key">"response"</span>: {
+        <span class="key">"toolCalls"</span>: [{
+          <span class="key">"id"</span>: <span class="str">"call_001"</span>,
+          <span class="key">"name"</span>: <span class="str">"generate_steps"</span>,
+          <span class="key">"arguments"</span>: <span class="str">"{}"</span>
+        }]
+      }
+    },
+    {
+      <span class="key">"match"</span>: { <span class="key">"userMessage"</span>: <span class="str">"plan a trip"</span>, <span class="key">"turnIndex"</span>: <span class="num">1</span> },
+      <span class="key">"response"</span>: { <span class="key">"content"</span>: <span class="str">"Great choices! Your trip is booked."</span> }
+    }
+  ]
+}</code></pre>
+        </div>
+        <p>
+          Turn 0: no assistant messages yet &rarr; returns tool call.<br />
+          Turn 1: one assistant message in history &rarr; returns final answer.<br />
+          Both fixtures share the same <code>userMessage</code>; <code>turnIndex</code>
+          disambiguates them without relying on ordering or server-side state.
+        </p>
+
+        <h3>hasToolResult &mdash; match by tool execution state</h3>
+        <p>
+          <code>hasToolResult</code> checks whether the request contains any
+          <code>role: "tool"</code> messages. For a simple two-step tool round, this is often
+          simpler than <code>turnIndex</code>:
+        </p>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            fixtures/hitl-hastoolresult.json <span class="lang-tag">json</span>
+          </div>
+          <pre><code>{
+  <span class="key">"fixtures"</span>: [
+    {
+      <span class="key">"match"</span>: { <span class="key">"userMessage"</span>: <span class="str">"plan a trip"</span>, <span class="key">"hasToolResult"</span>: <span class="kw">false</span> },
+      <span class="key">"response"</span>: {
+        <span class="key">"toolCalls"</span>: [{
+          <span class="key">"id"</span>: <span class="str">"call_001"</span>,
+          <span class="key">"name"</span>: <span class="str">"generate_steps"</span>,
+          <span class="key">"arguments"</span>: <span class="str">"{}"</span>
+        }]
+      }
+    },
+    {
+      <span class="key">"match"</span>: { <span class="key">"userMessage"</span>: <span class="str">"plan a trip"</span>, <span class="key">"hasToolResult"</span>: <span class="kw">true</span> },
+      <span class="key">"response"</span>: { <span class="key">"content"</span>: <span class="str">"Great choices! Your trip is booked."</span> }
+    }
+  ]
+}</code></pre>
+        </div>
+
+        <h3>Programmatic API</h3>
+        <p>
+          The <code>onTurn()</code> convenience method combines <code>turnIndex</code> with a
+          <code>userMessage</code> pattern:
+        </p>
+        <div class="code-block">
+          <div class="code-block-header">programmatic.ts <span class="lang-tag">ts</span></div>
+          <pre><code><span class="op">mock</span>.<span class="fn">onTurn</span>(<span class="num">0</span>, <span class="str">"plan a trip"</span>, {
+  <span class="prop">toolCalls</span>: [{ <span class="prop">id</span>: <span class="str">"call_001"</span>, <span class="prop">name</span>: <span class="str">"generate_steps"</span>, <span class="prop">arguments</span>: <span class="str">"{}"</span> }],
+});
+<span class="op">mock</span>.<span class="fn">onTurn</span>(<span class="num">1</span>, <span class="str">"plan a trip"</span>, { <span class="prop">content</span>: <span class="str">"Great choices! Your trip is booked."</span> });
+
+<span class="cm">// Or use on() directly for hasToolResult:</span>
+<span class="op">mock</span>.<span class="fn">on</span>(
+  { <span class="prop">userMessage</span>: <span class="str">"plan a trip"</span>, <span class="prop">hasToolResult</span>: <span class="kw">false</span> },
+  { <span class="prop">toolCalls</span>: [{ <span class="prop">id</span>: <span class="str">"call_001"</span>, <span class="prop">name</span>: <span class="str">"generate_steps"</span>, <span class="prop">arguments</span>: <span class="str">"{}"</span> }] }
+);
+<span class="op">mock</span>.<span class="fn">on</span>(
+  { <span class="prop">userMessage</span>: <span class="str">"plan a trip"</span>, <span class="prop">hasToolResult</span>: <span class="kw">true</span> },
+  { <span class="prop">content</span>: <span class="str">"Great choices! Your trip is booked."</span> }
+);</code></pre>
         </div>
 
         <h2>The tool-round idiom</h2>
@@ -195,6 +310,28 @@
             </tr>
             <tr>
               <td>
+                Same user prompt, different response based on how many assistant turns have occurred
+                (HITL, multi-step agents)
+              </td>
+              <td><code>turnIndex</code></td>
+              <td>
+                Stateless count of assistant messages in the request. Works with concurrent clients.
+                See above.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Different behavior before vs. after any tool has executed (simpler than toolCallId
+                for 2-step flows)
+              </td>
+              <td><code>hasToolResult</code></td>
+              <td>
+                Boolean check for <code>role: "tool"</code> presence. Stateless. Does not require
+                pinning a specific <code>tool_call_id</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>
                 Arbitrary inspection &mdash; message count, specific content at any position, custom
                 conversation state
               </td>
@@ -266,13 +403,13 @@
           </li>
           <li>
             <strong>Duplicate <code>userMessage</code> warnings.</strong>
-            <code>validateFixtures</code> warns when two fixtures share the same string
-            <code>userMessage</code>. The check looks at <code>userMessage</code> only &mdash; it
-            does <em>not</em> factor in <code>sequenceIndex</code>, <code>toolCallId</code>,
-            <code>model</code>, or <code>predicate</code>, so the warning still fires when those
-            discriminators are present. Treat it as advisory: if a runtime differentiator is in
-            place, the fixtures won't actually shadow each other at match time. Only fixtures with
-            <em>no</em> differentiator at all will truly shadow on match.
+            <code>validateFixtures</code> warns when two fixtures share the same
+            <code>userMessage</code> with identical <code>turnIndex</code>,
+            <code>hasToolResult</code>, and <code>sequenceIndex</code> values. Fixtures that differ
+            on any of these discriminators do not trigger the warning. Other fields like
+            <code>toolCallId</code>, <code>model</code>, and <code>predicate</code> are not factored
+            in, so the warning may still fire when those discriminators are present. Treat it as
+            advisory.
           </li>
           <li>
             <strong>First-wins ordering.</strong> Fixtures are evaluated in registration order (and,
@@ -285,6 +422,14 @@
             something in the <em>middle</em> of the conversation &mdash; e.g. &ldquo;did the user
             mention &lsquo;urgent&rsquo; three turns ago?&rdquo; &mdash; use <code>predicate</code>.
             No built-in match field inspects non-tail messages.
+          </li>
+          <li>
+            <strong>Prefer stateless criteria for shared instances.</strong>
+            <code>turnIndex</code> and <code>hasToolResult</code> are derived from the request
+            content and safe for concurrent clients. <code>sequenceIndex</code> uses a mutable
+            server-side counter that drifts when multiple test runners share a single aimock
+            instance. See <a href="/sequential-responses">Sequential Responses</a> for when
+            <code>sequenceIndex</code> is the right tool.
           </li>
         </ul>
       </main>

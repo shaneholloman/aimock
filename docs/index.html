@@ -1259,9 +1259,8 @@
           <div class="run-or">or</div>
           <div class="run-cmd">
             <span class="prompt-sign">$</span>
-            <code
-              >docker run -v $(pwd)/fixtures:/fixtures -p 4010:4010 ghcr.io/copilotkit/aimock</code
-            >
+            <!-- prettier-ignore -->
+            <code>docker run -v $(pwd)/fixtures:/fixtures -p 4010:4010 ghcr.io/copilotkit/aimock -h 0.0.0.0 -f /fixtures</code>
             <button class="copy-btn" onclick="copyCmd(this)">Copy</button>
           </div>
         </div>
@@ -1381,7 +1380,6 @@
       </div>
     </section>
 
-    <!-- ─── Section 3: Transition ────────────────────────────────── -->
     <!-- ─── Section 4: The Full Suite ────────────────────────────── -->
     <section class="section-suite" id="suite">
       <div class="container">
@@ -1470,7 +1468,7 @@
             <div class="demo-body">
               <pre><span class="t-green">$</span> npx @copilotkit/aimock --config aimock.json
 
-<span class="t-blue">&#9889;</span> aimock v1.0.0
+<span class="t-blue">&#9889;</span> aimock v1.16.0
 
 <span class="t-green">&#10003;</span> LLM    <span class="t-dim">mounted at</span>  /v1/chat/completions
 <span class="t-green">&#10003;</span> LLM    <span class="t-dim">mounted at</span>  /v1/messages

@@ -149,6 +149,17 @@
             "alpha" and "beta", their counters are tracked independently.
           </p>
         </div>
+
+        <div class="info-box">
+          <p>
+            <strong>Need stateless matching?</strong> <code>sequenceIndex</code> uses a server-side
+            counter that resets on <code>mock.reset()</code> and can drift when multiple clients
+            share an instance. If your use case is &ldquo;different response based on conversation
+            depth&rdquo; (not &ldquo;different response for the Nth identical request&rdquo;),
+            prefer the stateless <code>turnIndex</code> or <code>hasToolResult</code> fields
+            instead. See <a href="/multi-turn">Multi-Turn Conversations</a>.
+          </p>
+        </div>
       </main>
       <aside class="page-toc" id="page-toc"></aside>
     </div>

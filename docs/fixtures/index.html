@@ -133,6 +133,24 @@
               <td>Match on the Nth occurrence of this pattern</td>
             </tr>
             <tr>
+              <td>turnIndex</td>
+              <td>number</td>
+              <td>
+                Count of <code>role: "assistant"</code> messages in the request. Stateless &mdash;
+                derived from request content, safe for shared instances. See
+                <a href="/multi-turn">Multi-Turn Conversations</a>
+              </td>
+            </tr>
+            <tr>
+              <td>hasToolResult</td>
+              <td>boolean</td>
+              <td>
+                <code>true</code> when at least one <code>role: "tool"</code> message is present;
+                <code>false</code> when none are. Stateless alternative to ordering fixtures by
+                <code>toolCallId</code>. See <a href="/multi-turn">Multi-Turn Conversations</a>
+              </td>
+            </tr>
+            <tr>
               <td>endpoint</td>
               <td>string</td>
               <td>
@@ -223,12 +241,14 @@
             <code>duplicate userMessage 'hello' — shadows fixture 0</code>, where
             <code>'hello'</code> is the duplicated message and <code>0</code> is the zero-based
             index of the earlier fixture being shadowed. This is advisory, not a hard error: the
-            check looks at <code>userMessage</code> alone, so if you've added a runtime
-            differentiator (<code>sequenceIndex</code>, <code>toolCallId</code>, <code>model</code>,
-            or a <code>predicate</code>) the fixtures won't actually shadow each other at match
-            time. Only fixtures with no differentiator at all truly shadow on match &mdash; that's
-            the case where the second is never reached because the first wins. Safe to ignore in the
-            former case; investigate in the latter.
+            check now factors in <code>turnIndex</code>, <code>hasToolResult</code>, and
+            <code>sequenceIndex</code> when deciding whether two fixtures truly collide, but it does
+            <em>not</em> consider <code>toolCallId</code>, <code>model</code>, or
+            <code>predicate</code>, so the warning may still fire when those discriminators are
+            present. Treat it as advisory: if a runtime differentiator is in place, the fixtures
+            won't actually shadow each other at match time. Only fixtures with no differentiator at
+            all will truly shadow on match &mdash; that's the case where the second is never reached
+            because the first wins. Safe to ignore in the former case; investigate in the latter.
           </li>
           <li>
             <strong>Catch-all not last</strong> &mdash; a fixture with an empty <code>match</code>
