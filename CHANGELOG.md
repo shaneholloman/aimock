@@ -1,5 +1,11 @@
 # @copilotkit/aimock
 
+## [1.16.3] - 2026-04-29
+
+### Fixed
+
+- **Responses API**: `response.function_call_arguments.done` events now include `item_id` field, matching the real OpenAI Responses API shape. Without this, TanStack AI's OpenAI adapter emits `TOOL_CALL_END` with `toolCallId: undefined`, breaking ag-ui verify middleware.
+
 ## [1.16.2] - 2026-04-28
 
 ### Fixed

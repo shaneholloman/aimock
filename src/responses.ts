@@ -382,6 +382,7 @@ export function buildToolCallStreamEvents(
     // function_call_arguments.done
     events.push({
       type: "response.function_call_arguments.done",
+      item_id: fcId,
       output_index: idx,
       arguments: args,
     });
@@ -799,6 +800,7 @@ export function buildContentWithToolCallsStreamEvents(
 
     events.push({
       type: "response.function_call_arguments.done",
+      item_id: fcId,
       output_index: fcOutputIndex,
       arguments: args,
     });

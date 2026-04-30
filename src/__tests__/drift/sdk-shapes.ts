@@ -288,6 +288,7 @@ export function openaiResponsesToolCallEventShapes(): SSEEventShape[] {
       type: "response.function_call_arguments.done",
       dataShape: extractShape({
         type: "response.function_call_arguments.done",
+        item_id: "fc_abc123",
         output_index: 0,
         arguments: '{"city":"SF"}',
       }),

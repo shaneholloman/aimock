@@ -493,6 +493,23 @@ describe("POST /v1/responses (streaming)", () => {
     }
   });
 
+  it("tool call argument done events include item_id", async () => {
+    instance = await createServer(allFixtures);
+    const res = await post(`${instance.url}/v1/responses`, {
+      model: "gpt-4",
+      input: [{ role: "user", content: "weather" }],
+      stream: true,
+    });
+
+    const events = parseResponsesSSEEvents(res.body);
+    const doneEvents = events.filter((e) => e.type === "response.function_call_arguments.done");
+    expect(doneEvents.length).toBeGreaterThan(0);
+    for (const d of doneEvents) {
+      expect(d.item_id).toBeDefined();
+      expect(typeof d.item_id).toBe("string");
+    }
+  });
+
   it("tool call argument deltas reconstruct full arguments", async () => {
     instance = await createServer(allFixtures);
     const res = await post(`${instance.url}/v1/responses`, {
