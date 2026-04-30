@@ -88,10 +88,13 @@ export function matchFixture(
       }
     }
 
-    // toolCallId — match against the last tool message's tool_call_id
+    // toolCallId — a toolCallId fixture answers the model's response to a tool
+    // result, which by API contract only happens when the conversation's LAST
+    // message is a tool result. If a newer user (or other) turn follows the
+    // tool message, the stale tool_call_id must not shadow userMessage matchers.
     if (match.toolCallId !== undefined) {
-      const msg = getLastMessageByRole(effective.messages, "tool");
-      if (!msg || msg.tool_call_id !== match.toolCallId) continue;
+      const last = effective.messages[effective.messages.length - 1];
+      if (!last || last.role !== "tool" || last.tool_call_id !== match.toolCallId) continue;
     }
 
     // toolName — match against any tool definition by function.name

@@ -277,6 +277,60 @@ describe("matchFixture — toolCallId", () => {
     const req = makeReq({ messages: [{ role: "user", content: "hello" }] });
     expect(matchFixture([fixture], req)).toBeNull();
   });
+
+  it("does not match when a new user turn follows the tool message", () => {
+    // Regression: a toolCallId fixture is the response to a tool result, so it
+    // must only fire when the tool message is the LAST message in the request.
+    // If the user sends another turn after the tool result, the stale tool_call_id
+    // in history must not shadow userMessage matchers for the new turn.
+    const stale = makeFixture(
+      { toolCallId: "call_pie_chart" },
+      { content: "Pie chart rendered above" },
+    );
+    const fresh = makeFixture({ userMessage: "bar chart" }, { content: "bar chart response" });
+    const req = makeReq({
+      messages: [
+        { role: "user", content: "show me a pie chart" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: "call_pie_chart",
+              type: "function",
+              function: { name: "pieChart", arguments: "{}" },
+            },
+          ],
+        },
+        { role: "tool", content: "{}", tool_call_id: "call_pie_chart" },
+        { role: "assistant", content: "Pie chart rendered above" },
+        { role: "user", content: "now show me a bar chart" },
+      ],
+    });
+    expect(matchFixture([stale, fresh], req)).toBe(fresh);
+  });
+
+  it("does not match when an assistant content message follows the tool message", () => {
+    // The assistant has already emitted its final content for the tool result;
+    // any follow-up LLM call that arrives in this state should not re-fire the
+    // toolCallId fixture (which would loop the same content back).
+    const stale = makeFixture({ toolCallId: "call_abc" }, { content: "tool answered" });
+    const req = makeReq({
+      messages: [
+        { role: "user", content: "do thing" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            { id: "call_abc", type: "function", function: { name: "thing", arguments: "{}" } },
+          ],
+        },
+        { role: "tool", content: "{}", tool_call_id: "call_abc" },
+        { role: "assistant", content: "tool answered" },
+      ],
+    });
+    expect(matchFixture([stale], req)).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,11 @@
 # @copilotkit/aimock
 
+## [1.16.4] - 2026-04-30
+
+### Fixed
+
+- **Router: `toolCallId` matched stale tool messages from history**. The matcher previously used `getLastMessageByRole(messages, "tool")`, so once a conversation contained any prior tool result, every subsequent request still had a "last tool message" buried in history — a `toolCallId` fixture could win and shadow `userMessage` matchers for new user turns. Tightened to require the tool message to be the **last** message in the request (which is the only state in which the LLM is being asked to respond to a tool result). Surfaced as: in CopilotKit's beautiful-chat showcase, clicking a second suggestion replayed the first chart's content fixture instead of producing a new tool call.
+
 ## [1.16.3] - 2026-04-29
 
 ### Fixed

@@ -182,10 +182,10 @@ describe("integration: tool call flow", () => {
 
 describe("integration: multi-turn flow", () => {
   it("handles initial request and tool result follow-up", async () => {
-    // More specific match (toolCallId) must come first
-    // since the router returns the first match and
-    // "change background" is still in the messages array
-    // on the second turn.
+    // toolCallId fixtures only fire when the request's last message is a tool
+    // result, so fixture order between toolCallId and userMessage does not
+    // matter here — turn 1 (last = user) hits userMessage; turn 2 (last = tool)
+    // hits toolCallId.
     const fixtures: Fixture[] = [
       {
         match: { toolCallId: "call_bg_001" },
