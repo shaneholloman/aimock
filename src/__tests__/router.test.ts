@@ -309,6 +309,28 @@ describe("matchFixture — toolCallId", () => {
     });
     expect(matchFixture([stale, fresh], req)).toBe(fresh);
   });
+
+  it("does not match when an assistant content message follows the tool message", () => {
+    // The assistant has already emitted its final content for the tool result;
+    // any follow-up LLM call that arrives in this state should not re-fire the
+    // toolCallId fixture (which would loop the same content back).
+    const stale = makeFixture({ toolCallId: "call_abc" }, { content: "tool answered" });
+    const req = makeReq({
+      messages: [
+        { role: "user", content: "do thing" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            { id: "call_abc", type: "function", function: { name: "thing", arguments: "{}" } },
+          ],
+        },
+        { role: "tool", content: "{}", tool_call_id: "call_abc" },
+        { role: "assistant", content: "tool answered" },
+      ],
+    });
+    expect(matchFixture([stale], req)).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
