@@ -277,6 +277,38 @@ describe("matchFixture — toolCallId", () => {
     const req = makeReq({ messages: [{ role: "user", content: "hello" }] });
     expect(matchFixture([fixture], req)).toBeNull();
   });
+
+  it("does not match when a new user turn follows the tool message", () => {
+    // Regression: a toolCallId fixture is the response to a tool result, so it
+    // must only fire when the tool message is the LAST message in the request.
+    // If the user sends another turn after the tool result, the stale tool_call_id
+    // in history must not shadow userMessage matchers for the new turn.
+    const stale = makeFixture(
+      { toolCallId: "call_pie_chart" },
+      { content: "Pie chart rendered above" },
+    );
+    const fresh = makeFixture({ userMessage: "bar chart" }, { content: "bar chart response" });
+    const req = makeReq({
+      messages: [
+        { role: "user", content: "show me a pie chart" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: "call_pie_chart",
+              type: "function",
+              function: { name: "pieChart", arguments: "{}" },
+            },
+          ],
+        },
+        { role: "tool", content: "{}", tool_call_id: "call_pie_chart" },
+        { role: "assistant", content: "Pie chart rendered above" },
+        { role: "user", content: "now show me a bar chart" },
+      ],
+    });
+    expect(matchFixture([stale, fresh], req)).toBe(fresh);
+  });
 });
 
 // ---------------------------------------------------------------------------
