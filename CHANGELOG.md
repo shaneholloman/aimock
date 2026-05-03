@@ -1,5 +1,25 @@
 # @copilotkit/aimock
 
+## [Unreleased]
+
+### Added
+
+- **Gemini Interactions API** — 12th LLM provider. Full record/replay support for Google's Gemini Interactions streaming API (`/v1beta/models/{model}:streamGenerateContent`), including multi-turn conversations, function calling, streaming text, and safety metadata. Drift tests, integration tests, and documentation included. (PR #139)
+- **AG-UI interrupt-aware types** — `AGUIInterrupt`, `AGUIResumeEntry`, and `AGUIRunFinishedOutcome` (discriminated union: success | interrupt) from ag-ui PR #1569. `outcome` field on `AGUIRunFinishedEvent`, `resume` field on `AGUIRunAgentInput`.
+- **AG-UI convenience builders** — `buildActivityDelta`, `buildToolCallChunk`, `buildRawEvent`, `buildCustomEvent`, `buildReasoningChunk`, `buildReasoningEncryptedValue`.
+- **`./agui` subpath export** — `agui-stub.ts` wired into `tsdown.config.ts` and `package.json` exports, matching `./a2a`, `./mcp`, `./vector` pattern.
+- **Complete AG-UI type exports** — All event types (reasoning, step, thinking, raw, custom, chunk), `AGUIBuildOpts`, `matchesAGUIFixture`, `AGUIReasoningEncryptedValueSubtype`, `AGUIMessageRole` now exported from package root.
+- **`"warn"` log level** — New log level between `"silent"` and `"info"` with proper hierarchy. `AGUIMockOptions.logLevel` option added; AG-UI mock defaults to `"warn"` instead of `"silent"`.
+
+### Fixed
+
+- **AG-UI type alignment** — `AGUIMessage.id` and `AGUIRunAgentInput.threadId`/`runId` now required (was optional). `AGUIToolDefinition.description` now required, `metadata` field added. `encryptedValue` and `error` fields added to `AGUIMessage`. `AGUIMessageRole` union covers all 7 protocol roles.
+- **AG-UI handler hardening** — `writeAGUIEventStream` logs all caught errors (was silently swallowing non-TypeError/RangeError), preserves user-supplied timestamps (was always overwriting with `Date.now()`). `buildCompositeResponse` omits `RUN_FINISHED` when inner events contain `RUN_ERROR` (protocol compliance). `matchesFixture` resets `lastIndex` on regex before `test()`.
+- **AG-UI recorder SSE parsing** — Handle `data:` lines without space after colon per SSE spec. Serialize predicate-match fixtures as `__NO_USER_MESSAGE__` sentinel on disk instead of producing catch-all `{}`. Return actual HTTP status from proxy (was always boolean/200). Forward upstream content-type on non-2xx responses instead of SSE headers.
+- **AG-UI mock error handling** — `readBody` wrapped in try/catch (was unguarded await producing opaque 500s). JSON parse errors now include detail in 400 response. Proxy status correctly journaled.
+- **Drift auto-remediation pipeline** — `drift-report-collector` now clones canonical ag-ui repo and runs AG-UI schema drift test alongside HTTP API drift. `test-drift.yml` Slack notification distinguishes AG-UI schema vs HTTP API drift vs infra error; uses `jq` for safe JSON construction. `fix-drift.yml` clones ag-ui before collection, adds `continue-on-error` on autofix with `success()` guard on PR creation. `fix-drift.ts` corrected `src/agui.ts` references to `src/agui-handler.ts`, added SDK type to drift prompt, flexible changelog title matching, ENOENT-specific catch in `syncDescriptionFromReadme`, exit code 4 for no-changes (was collision with exit 2), version bump wrapped in try/catch.
+- **AG-UI schema drift test hardening** — `skipIf` guard checks both source files (was only canonical). Field regex handles multi-arg Zod types. Recursive parent field resolution for multi-level inheritance. Comment lines stripped before field matching. Base fields parsed dynamically from source with hardcoded fallback.
+
 ## [1.16.4] - 2026-04-30
 
 ### Fixed
