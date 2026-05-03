@@ -399,6 +399,7 @@ export interface AGUIFixture {
 export interface AGUIMockOptions {
   port?: number;
   host?: string;
+  logLevel?: string;
 }
 
 export interface AGUIRecordConfig {

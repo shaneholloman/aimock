@@ -97,8 +97,8 @@ const watchMode = values.watch!;
 const validateOnLoad = values["validate-on-load"]!;
 const logLevelStr = values["log-level"]!;
 
-if (!["silent", "info", "debug"].includes(logLevelStr)) {
-  console.error(`Invalid log-level: ${logLevelStr} (must be silent, info, or debug)`);
+if (!["silent", "warn", "info", "debug"].includes(logLevelStr)) {
+  console.error(`Invalid log-level: ${logLevelStr} (must be silent, warn, info, or debug)`);
   process.exit(1);
 }
 const logLevel = logLevelStr as LogLevel;

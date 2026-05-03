@@ -115,23 +115,35 @@ function teeUpstreamStream(
       (upstreamRes) => {
         const upstreamStatus = upstreamRes.statusCode ?? 200;
 
-        // Set SSE headers on the client response
+        // Set appropriate headers on the client response
         if (!clientRes.headersSent) {
-          clientRes.writeHead(upstreamStatus, {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
-          });
+          if (upstreamStatus >= 200 && upstreamStatus < 300) {
+            clientRes.writeHead(upstreamStatus, {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              Connection: "keep-alive",
+            });
+          } else {
+            const ct = upstreamRes.headers["content-type"] || "application/json";
+            clientRes.writeHead(upstreamStatus, { "Content-Type": ct });
+          }
         }
 
         const chunks: Buffer[] = [];
+        let clientWriteFailed = false;
 
         upstreamRes.on("data", (chunk: Buffer) => {
           // Relay to client in real time
           try {
             clientRes.write(chunk);
-          } catch {
-            // Client connection may have closed — continue buffering for recording
+          } catch (err) {
+            if (!clientWriteFailed) {
+              clientWriteFailed = true;
+              logger?.warn(
+                "Client write failed during proxy relay:",
+                err instanceof Error ? err.message : String(err),
+              );
+            }
           }
           // Buffer for fixture construction
           chunks.push(chunk);
@@ -247,8 +259,10 @@ function parseSSEEvents(text: string, logger?: Logger): AGUIEvent[] {
         try {
           const parsed = JSON.parse(payload) as AGUIEvent;
           events.push(parsed);
-        } catch {
-          logger?.warn(`Skipping unparseable SSE data line: ${payload.slice(0, 200)}`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (logger) logger.warn(`Skipping unparseable SSE data line: ${payload.slice(0, 200)}`);
+          else console.warn(`Skipping unparseable SSE data line: ${msg}`);
         }
       }
     }
