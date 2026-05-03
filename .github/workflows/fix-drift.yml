@@ -30,7 +30,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # Step 0: Configure git identity and create fix branch
+      # Step 0a: Clone ag-ui repo for AG-UI schema drift detection
+      - name: Clone ag-ui repo
+        run: git clone --depth 1 https://github.com/ag-ui-protocol/ag-ui.git ../ag-ui
+
+      # Step 0b: Configure git identity and create fix branch
       - name: Configure git
         run: |
           git config user.name "aimock-drift-bot"
@@ -83,7 +87,9 @@ jobs:
 
       # Step 3: Invoke Claude Code to fix
       - name: Auto-fix drift
+        id: autofix
         if: steps.check.outputs.skip != 'true'
+        continue-on-error: true
         run: npx tsx scripts/fix-drift.ts
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -118,8 +124,8 @@ jobs:
         id: pr
         if: success() && steps.check.outputs.skip != 'true'
         run: |
-          npx tsx scripts/fix-drift.ts --create-pr 2>&1 | tee /tmp/pr-output.txt
-          PR_URL=$(grep -oE 'https://github.com/[^ ]+/pull/[0-9]+' /tmp/pr-output.txt | head -1)
+          npx tsx scripts/fix-drift.ts --create-pr
+          PR_URL=$(gh pr list --head "$(git branch --show-current)" --json url --jq '.[0].url')
           if [ -z "$PR_URL" ]; then echo "No PR URL found"; exit 1; fi
           echo "url=$PR_URL" >> $GITHUB_OUTPUT
         env:
@@ -146,9 +152,11 @@ jobs:
         if: success() && steps.pr.outputs.url != ''
         run: |
           if [ -z "$SLACK_WEBHOOK" ]; then echo "SLACK_WEBHOOK not set, skipping"; exit 0; fi
-          curl -s -X POST "$SLACK_WEBHOOK" \
+          MSG="✅ *Drift auto-fix PR created with auto-merge enabled*\nPR: ${{ steps.pr.outputs.url }}\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD=$(jq -n --arg text "$MSG" '{text: $text}')
+          curl -sf -X POST "$SLACK_WEBHOOK" \
             -H "Content-Type: application/json" \
-            -d "{\"text\":\"✅ *Drift auto-fixed and merged*\nPR: ${{ steps.pr.outputs.url }}\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+            -d "$PAYLOAD"
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
@@ -157,8 +165,10 @@ jobs:
         if: failure() && steps.check.outputs.skip != 'true'
         run: |
           if [ -z "$SLACK_WEBHOOK" ]; then echo "SLACK_WEBHOOK not set, skipping"; exit 0; fi
-          curl -s -X POST "$SLACK_WEBHOOK" \
+          MSG="❌ *Drift auto-fix failed* — issue created\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD=$(jq -n --arg text "$MSG" '{text: $text}')
+          curl -sf -X POST "$SLACK_WEBHOOK" \
             -H "Content-Type: application/json" \
-            -d "{\"text\":\"❌ *Drift auto-fix failed* — issue created\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+            -d "$PAYLOAD"
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}

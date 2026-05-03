@@ -14,7 +14,8 @@
  * Exit codes:
  *   0 — success (or issue created successfully in --create-issue mode)
  *   1 — failure
- *   2 — no source files changed (--create-pr mode, nothing to commit)
+ *   2 — critical drift found (drift collector)
+ *   4 — no source files changed (--create-pr mode, nothing to commit)
  *   3 — unhandled error (e.g. bad arguments, missing report, git/gh command failure)
  *   124 — Claude Code timed out (default mode)
  *   In default mode, the exit code is passed through from Claude Code.
@@ -60,6 +61,8 @@ export const BUILDER_TO_SKILL_SECTION: Record<string, string> = {
   "src/ws-gemini-live.ts": "Gemini Live WebSocket",
   "src/helpers.ts": "OpenAI Chat Completions",
   "src/gemini-interactions.ts": "Gemini Interactions",
+  "src/agui-types.ts": "AG-UI Events",
+  "src/agui-handler.ts": "AG-UI Events",
 };
 
 // ---------------------------------------------------------------------------
@@ -268,8 +271,9 @@ export function buildPrompt(report: DriftReport): string {
     for (const diff of entry.diffs) {
       lines.push(`    - [${diff.severity}] ${diff.issue}`);
       lines.push(`      Path: ${diff.path}`);
+      lines.push(`      SDK type: ${diff.expected}`);
       lines.push(`      Real API: ${diff.real}`);
-      lines.push(`      Mock: ${diff.mock}`);
+      lines.push(`      Mock:     ${diff.mock}`);
     }
     lines.push("");
   }
@@ -282,6 +286,25 @@ export function buildPrompt(report: DriftReport): string {
   lines.push("Only update the Response Types and API Endpoints sections that correspond to the");
   lines.push("changed builders. Do not rewrite unrelated sections.");
   lines.push("");
+  // Add AG-UI specific guidance if any AG-UI entries exist
+  const hasAgUiDrift = report.entries.some((e) => e.provider === "AG-UI");
+  if (hasAgUiDrift) {
+    lines.push("## AG-UI Schema Drift");
+    lines.push("");
+    lines.push("For AG-UI drift entries, the fix target is `src/agui-types.ts`.");
+    lines.push(
+      "Compare against the canonical source at `../ag-ui/sdks/typescript/packages/core/src/events.ts`.",
+    );
+    lines.push("");
+    lines.push("- Add missing event types to the `AGUIEventType` union type.");
+    lines.push("- Add missing fields to the corresponding `AGUI*Event` interfaces.");
+    lines.push("- Fix optionality mismatches (required vs optional) to match canonical schemas.");
+    lines.push(
+      "- Also update any builder functions in `src/agui-handler.ts` that construct these events.",
+    );
+    lines.push("");
+  }
+
   lines.push("## After all fixes");
   lines.push("");
   lines.push("1. Run the full test suite: pnpm test");
@@ -428,10 +451,10 @@ function syncDescriptionFromReadme(pkg: { description?: string; [key: string]: u
       if (
         !trimmed ||
         trimmed.startsWith("#") ||
-        trimmed.startsWith("[") ||
-        trimmed.startsWith("http") ||
+        trimmed.startsWith("[![") ||
         trimmed.startsWith("![") ||
-        trimmed.startsWith("[![")
+        trimmed.startsWith("[") ||
+        trimmed.startsWith("http")
       ) {
         continue;
       }
@@ -442,8 +465,10 @@ function syncDescriptionFromReadme(pkg: { description?: string; [key: string]: u
       }
       break;
     }
-  } catch {
-    // README not found — skip
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn("Could not sync description from README:", err);
+    }
   }
 }
 
@@ -466,9 +491,10 @@ export function addChangelogEntry(report: DriftReport, version: string): void {
     "",
   ].join("\n");
 
-  // Insert after the first line (the title)
-  const titleLine = "# @copilotkit/aimock\n";
-  if (existing.startsWith(titleLine)) {
+  // Insert after the title line (any line starting with "# ")
+  const titleMatch = existing.match(/^# .+\n/);
+  if (titleMatch) {
+    const titleLine = titleMatch[0];
     const rest = existing.slice(titleLine.length);
     writeFileSync(changelogPath, titleLine + "\n" + newEntry + rest, "utf-8");
   } else {
@@ -591,7 +617,7 @@ function createPr(report: DriftReport): void {
       "ERROR: No source files changed. Claude Code may not have made any fixes, " +
         "or all changes were reverted during verification. Aborting PR creation.",
     );
-    process.exit(2);
+    process.exit(4); // no source files changed (distinct from exit 2 = critical drift)
   }
 
   if (builderFiles.length > 0) {
@@ -613,15 +639,20 @@ function createPr(report: DriftReport): void {
     ]);
   }
 
-  const newVersion = patchBumpVersion();
-  console.log(`Bumped version to ${newVersion}`);
+  try {
+    const newVersion = patchBumpVersion();
+    console.log(`Bumped version to ${newVersion}`);
 
-  addChangelogEntry(report, newVersion);
-  console.log("Added CHANGELOG.md entry");
+    addChangelogEntry(report, newVersion);
+    console.log("Added CHANGELOG.md entry");
 
-  // Always commit version bump + changelog
-  execFileSafe("git", ["add", "package.json", "CHANGELOG.md"]);
-  execFileSafe("git", ["commit", "-m", `chore: bump version to ${newVersion}`, "--allow-empty"]);
+    // Always commit version bump + changelog
+    execFileSafe("git", ["add", "package.json", "CHANGELOG.md"]);
+    execFileSafe("git", ["commit", "-m", `chore: bump version to ${newVersion}`, "--allow-empty"]);
+  } catch (err) {
+    console.warn("Version bump failed, skipping:", err);
+    // Continue with PR creation without version bump
+  }
 
   // Catch any remaining files
   const remaining = getChangedFiles();
