@@ -73,6 +73,7 @@ export interface AGUIRunFinishedEvent extends AGUIBaseEvent {
   threadId: string;
   runId: string;
   result?: unknown;
+  outcome?: AGUIRunFinishedOutcome;
 }
 
 export interface AGUIRunErrorEvent extends AGUIBaseEvent {
@@ -94,6 +95,15 @@ export interface AGUIStepFinishedEvent extends AGUIBaseEvent {
 // Text messages
 
 export type AGUITextMessageRole = "developer" | "system" | "assistant" | "user";
+
+export type AGUIMessageRole =
+  | "developer"
+  | "system"
+  | "assistant"
+  | "user"
+  | "tool"
+  | "activity"
+  | "reasoning";
 
 export interface AGUITextMessageStartEvent extends AGUIBaseEvent {
   type: "TEXT_MESSAGE_START";
@@ -310,17 +320,40 @@ export type AGUIEvent =
   | AGUIThinkingTextMessageContentEvent
   | AGUIThinkingTextMessageEndEvent;
 
+// ─── Interrupt / Resume types ────────────────────────────────────────────────
+
+export interface AGUIInterrupt {
+  id: string;
+  reason: string;
+  message?: string;
+  toolCallId?: string;
+  responseSchema?: Record<string, unknown>;
+  expiresAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AGUIResumeEntry {
+  interruptId: string;
+  status: "resolved" | "cancelled";
+  payload?: unknown;
+}
+
+export type AGUIRunFinishedOutcome =
+  | { type: "success" }
+  | { type: "interrupt"; interrupts: AGUIInterrupt[] };
+
 // ─── Request types ───────────────────────────────────────────────────────────
 
 export interface AGUIRunAgentInput {
-  threadId?: string;
-  runId?: string;
+  threadId: string;
+  runId: string;
   parentRunId?: string;
   state?: unknown;
   messages?: AGUIMessage[];
   tools?: AGUIToolDefinition[];
   context?: Array<{ description: string; value: string }>;
   forwardedProps?: unknown;
+  resume?: AGUIResumeEntry[];
 }
 
 export interface AGUIToolCall {
@@ -331,18 +364,21 @@ export interface AGUIToolCall {
 }
 
 export interface AGUIMessage {
-  id?: string;
-  role: string;
+  id: string;
+  role: AGUIMessageRole;
   content?: string;
   name?: string;
+  encryptedValue?: string;
+  error?: string;
   toolCallId?: string;
   toolCalls?: AGUIToolCall[];
 }
 
 export interface AGUIToolDefinition {
   name: string;
-  description?: string;
+  description: string;
   parameters?: unknown; // JSON Schema
+  metadata?: Record<string, unknown>;
 }
 
 // ─── Fixture types ───────────────────────────────────────────────────────────
