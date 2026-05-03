@@ -376,6 +376,7 @@ export type RecordProviderKey =
   | "openai"
   | "anthropic"
   | "gemini"
+  | "gemini-interactions"
   | "vertexai"
   | "bedrock"
   | "azure"
