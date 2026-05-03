@@ -385,6 +385,10 @@ function collectDriftEntries(results: VitestJsonResult): DriftEntry[] {
       }
     }
 
+    for (const msg of unparseableMessages) {
+      console.warn(`  Unparseable failure message (first 300 chars): ${msg.slice(0, 300)}`);
+    }
+
     // Distinguish infrastructure errors from broken drift report formats
     const infraIndicators = [
       /API returned \d{3}/i,
