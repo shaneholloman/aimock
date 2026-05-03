@@ -199,6 +199,7 @@ export type {
   AGUIMockOptions,
   AGUIRunAgentInput,
   AGUIMessage,
+  AGUIMessageRole,
   AGUIToolDefinition,
   AGUIToolCall,
   AGUIEvent,
@@ -206,24 +207,58 @@ export type {
   AGUIFixture,
   AGUIFixtureMatch,
   AGUIRecordConfig,
-  // Key individual event types
+  // Base event
+  AGUIBaseEvent,
+  // Lifecycle events
   AGUIRunStartedEvent,
   AGUIRunFinishedEvent,
   AGUIRunErrorEvent,
+  AGUIStepStartedEvent,
+  AGUIStepFinishedEvent,
+  // Text message events
   AGUITextMessageStartEvent,
   AGUITextMessageContentEvent,
   AGUITextMessageEndEvent,
   AGUITextMessageChunkEvent,
+  AGUITextMessageRole,
+  // Tool call events
   AGUIToolCallStartEvent,
   AGUIToolCallArgsEvent,
   AGUIToolCallEndEvent,
+  AGUIToolCallChunkEvent,
   AGUIToolCallResultEvent,
+  // State events
   AGUIStateSnapshotEvent,
   AGUIStateDeltaEvent,
   AGUIMessagesSnapshotEvent,
+  // Activity events
   AGUIActivitySnapshotEvent,
   AGUIActivityDeltaEvent,
+  // Reasoning events
+  AGUIReasoningStartEvent,
+  AGUIReasoningMessageStartEvent,
+  AGUIReasoningMessageContentEvent,
+  AGUIReasoningMessageEndEvent,
+  AGUIReasoningMessageChunkEvent,
+  AGUIReasoningEndEvent,
+  AGUIReasoningEncryptedValueEvent,
+  AGUIReasoningEncryptedValueSubtype,
+  // Special events
+  AGUIRawEvent,
+  AGUICustomEvent,
+  // Deprecated thinking events
+  AGUIThinkingStartEvent,
+  AGUIThinkingEndEvent,
+  AGUIThinkingTextMessageStartEvent,
+  AGUIThinkingTextMessageContentEvent,
+  AGUIThinkingTextMessageEndEvent,
+  // Interrupt/Resume
+  AGUIInterrupt,
+  AGUIResumeEntry,
+  AGUIRunFinishedOutcome,
 } from "./agui-types.js";
+export type { AGUIBuildOpts } from "./agui-handler.js";
+export { matchesFixture as matchesAGUIFixture } from "./agui-handler.js";
 export {
   buildTextResponse as buildAGUITextResponse,
   buildTextChunkResponse as buildAGUITextChunkResponse,
@@ -236,6 +271,12 @@ export {
   buildErrorResponse as buildAGUIErrorResponse,
   buildStepWithText as buildAGUIStepWithText,
   buildCompositeResponse as buildAGUICompositeResponse,
+  buildActivityDelta as buildAGUIActivityDelta,
+  buildToolCallChunk as buildAGUIToolCallChunk,
+  buildRawEvent as buildAGUIRawEvent,
+  buildCustomEvent as buildAGUICustomEvent,
+  buildReasoningChunk as buildAGUIReasoningChunk,
+  buildReasoningEncryptedValue as buildAGUIReasoningEncryptedValue,
   extractLastUserMessage as extractAGUILastUserMessage,
   findFixture as findAGUIFixture,
   writeAGUIEventStream,
