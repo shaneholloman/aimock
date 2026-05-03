@@ -396,7 +396,7 @@ export interface MockServerOptions {
   latency?: number;
   chunkSize?: number;
   /** Log verbosity. CLI default is "info"; programmatic default (when omitted) is "silent". */
-  logLevel?: "silent" | "info" | "debug";
+  logLevel?: "silent" | "warn" | "info" | "debug";
   chaos?: ChaosConfig;
   /** Enable Prometheus-compatible /metrics endpoint. */
   metrics?: boolean;

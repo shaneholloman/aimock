@@ -19,7 +19,7 @@ import {
 } from "./agui-handler.js";
 import { flattenHeaders, readBody } from "./helpers.js";
 import { proxyAndRecordAGUI } from "./agui-recorder.js";
-import { Logger } from "./logger.js";
+import { Logger, type LogLevel } from "./logger.js";
 
 export class AGUIMock implements Mountable {
   private fixtures: AGUIFixture[] = [];
@@ -33,7 +33,7 @@ export class AGUIMock implements Mountable {
 
   constructor(options?: AGUIMockOptions) {
     this.options = options ?? {};
-    this.logger = new Logger("silent");
+    this.logger = new Logger((options?.logLevel as LogLevel) ?? "warn");
   }
 
   // ---- Fluent registration API ----
@@ -138,7 +138,16 @@ export class AGUIMock implements Mountable {
       this.registry.incrementCounter("aimock_agui_requests_total", { method: "POST" });
     }
 
-    const body = await readBody(req);
+    let body: string;
+    try {
+      body = await readBody(req);
+    } catch (err) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      const detail = err instanceof Error ? err.message : "body read failed";
+      res.end(JSON.stringify({ error: `Failed to read request body: ${detail}` }));
+      this.journalRequest(req, pathname, 400);
+      return true;
+    }
 
     let input: AGUIRunAgentInput;
     try {

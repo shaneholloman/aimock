@@ -1,9 +1,10 @@
-export type LogLevel = "silent" | "info" | "debug";
+export type LogLevel = "silent" | "warn" | "info" | "debug";
 
 const LEVELS: Record<LogLevel, number> = {
   silent: 0,
-  info: 1,
-  debug: 2,
+  warn: 1,
+  info: 2,
+  debug: 3,
 };
 
 export class Logger {
@@ -26,10 +27,14 @@ export class Logger {
   }
 
   warn(...args: unknown[]): void {
-    console.warn("[aimock]", ...args);
+    if (this.level >= LEVELS.warn) {
+      console.warn("[aimock]", ...args);
+    }
   }
 
   error(...args: unknown[]): void {
-    console.error("[aimock]", ...args);
+    if (this.level >= LEVELS.warn) {
+      console.error("[aimock]", ...args);
+    }
   }
 }
