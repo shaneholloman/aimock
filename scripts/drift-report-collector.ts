@@ -403,6 +403,8 @@ function collectDriftEntries(results: VitestJsonResult): DriftEntry[] {
       /ENOTFOUND/i,
       /network error/i,
       /API unavailable/i,
+      /returned no SSE events/i,
+      /returned empty body/i,
     ];
     const driftLikeIndicators = [/drift/i, /mismatch/i, /expected.*but/i, /LLMOCK DRIFT/i];
 
