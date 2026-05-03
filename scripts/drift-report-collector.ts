@@ -372,11 +372,57 @@ function collectDriftEntries(results: VitestJsonResult): DriftEntry[] {
   }
 
   if (unparseable > 0 && entries.length === 0) {
-    console.error(
-      `ERROR: ${unparseable} test failure(s) could not be parsed as drift reports.`,
-      "This may indicate broken test infrastructure or a changed report format.",
+    // Collect the unparseable failure messages to classify them
+    const unparseableMessages: string[] = [];
+    for (const file of results.testResults) {
+      for (const assertion of file.assertionResults) {
+        if (assertion.status !== "failed" || assertion.failureMessages.length === 0) continue;
+        const fullMessage = assertion.failureMessages.join("\n");
+        const parsed = parseDriftBlock(fullMessage);
+        if (!parsed || parsed.diffs.length === 0) {
+          unparseableMessages.push(fullMessage);
+        }
+      }
+    }
+
+    // Distinguish infrastructure errors from broken drift report formats
+    const infraIndicators = [
+      /API returned \d{3}/i,
+      /status \d{3}/i,
+      /<!DOCTYPE/i,
+      /<html/i,
+      /failed to parse JSON/i,
+      /empty response/i,
+      /fetch failed/i,
+      /ECONNREFUSED/i,
+      /ETIMEDOUT/i,
+      /ENOTFOUND/i,
+      /network error/i,
+      /API unavailable/i,
+    ];
+    const driftLikeIndicators = [/drift/i, /mismatch/i, /expected.*but/i, /LLMOCK DRIFT/i];
+
+    const allInfraErrors = unparseableMessages.every((msg) =>
+      infraIndicators.some((re) => re.test(msg)),
     );
-    throw new Error(`${unparseable} unparseable test failures with 0 drift entries — investigate`);
+    const anyDriftLike = unparseableMessages.some((msg) =>
+      driftLikeIndicators.some((re) => re.test(msg)),
+    );
+
+    if (allInfraErrors && !anyDriftLike) {
+      console.warn(
+        `WARNING: ${unparseable} test failure(s) appear to be API/infrastructure errors ` +
+          `(not drift reports). Continuing with 0 drift entries.`,
+      );
+    } else {
+      console.error(
+        `ERROR: ${unparseable} test failure(s) could not be parsed as drift reports.`,
+        "This may indicate broken test infrastructure or a changed report format.",
+      );
+      throw new Error(
+        `${unparseable} unparseable test failures with 0 drift entries — investigate`,
+      );
+    }
   } else if (unparseable > 0) {
     console.warn(
       `WARNING: ${unparseable} test failure(s) did not contain parseable drift data (${entries.length} drift entries collected).`,
