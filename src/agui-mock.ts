@@ -143,9 +143,10 @@ export class AGUIMock implements Mountable {
     let input: AGUIRunAgentInput;
     try {
       input = JSON.parse(body) as AGUIRunAgentInput;
-    } catch {
+    } catch (err) {
       res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid JSON body" }));
+      const detail = err instanceof Error ? err.message : "unknown parse error";
+      res.end(JSON.stringify({ error: `Invalid JSON body: ${detail}` }));
       this.journalRequest(req, pathname, 400);
       return true;
     }
@@ -160,7 +161,7 @@ export class AGUIMock implements Mountable {
 
     // No match — if recording is enabled, proxy to upstream
     if (this.recordConfig) {
-      const proxied = await proxyAndRecordAGUI(
+      const result = await proxyAndRecordAGUI(
         req,
         res,
         input,
@@ -168,8 +169,8 @@ export class AGUIMock implements Mountable {
         this.recordConfig,
         this.logger,
       );
-      if (proxied) {
-        this.journalRequest(req, pathname, 200);
+      if (result !== false) {
+        this.journalRequest(req, pathname, result);
         return true;
       }
     }

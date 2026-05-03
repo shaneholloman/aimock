@@ -67,47 +67,79 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Fail if critical drift detected
+        if: steps.drift.outputs.exit_code == '2'
+        run: exit 1
+
+  notify:
+    if: always() && github.event_name != 'pull_request'
+    needs: [drift, agui-schema-drift]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
       - name: Check previous run status
         id: prev
-        if: always()
         run: |
-          PREV=$(gh run list --workflow="Drift Tests" --branch=main --limit=2 --json conclusion --jq '.[1].conclusion // "unknown"')
+          PREV=$(gh run list --workflow="Drift Tests" --repo="${{ github.repository }}" --branch=main --limit=2 --json conclusion --jq '.[1].conclusion // "unknown"')
           echo "conclusion=$PREV" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify Slack
-        if: always()
         run: |
           if [ -z "$SLACK_WEBHOOK" ]; then echo "SLACK_WEBHOOK not set, skipping"; exit 0; fi
 
           PREV="${{ steps.prev.outputs.conclusion }}"
-          NOW="${{ job.status }}"
-          DRIFT="${{ steps.drift.outputs.exit_code }}"
+          DRIFT_RESULT="${{ needs.drift.result }}"
+          AGUI_RESULT="${{ needs.agui-schema-drift.result }}"
 
-          # Drift detected — always notify
-          if [ "$DRIFT" = "2" ]; then
+          HTTP_DRIFT=false
+          AGUI_DRIFT=false
+          INFRA_ERROR=false
+
+          # Determine what happened in each job
+          if [ "$DRIFT_RESULT" = "failure" ]; then
+            HTTP_DRIFT=true
+          elif [ "$DRIFT_RESULT" != "success" ] && [ "$DRIFT_RESULT" != "skipped" ]; then
+            INFRA_ERROR=true
+          fi
+
+          if [ "$AGUI_RESULT" = "failure" ]; then
+            AGUI_DRIFT=true
+          elif [ "$AGUI_RESULT" != "success" ] && [ "$AGUI_RESULT" != "skipped" ]; then
+            INFRA_ERROR=true
+          fi
+
+          RUN_URL="<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>"
+
+          # Both types of drift
+          if [ "$HTTP_DRIFT" = "true" ] && [ "$AGUI_DRIFT" = "true" ]; then
             EMOJI="🚨"
-            MSG="*Drift detected* in aimock — providers changed response formats. <https://github.com/CopilotKit/aimock/actions/runs/${{ github.run_id }}|View run>"
+            MSG="*Drift detected* in aimock — HTTP API drift + AG-UI schema drift. ${RUN_URL}"
+          # HTTP API drift only
+          elif [ "$HTTP_DRIFT" = "true" ]; then
+            EMOJI="🚨"
+            MSG="*HTTP API drift detected* in aimock — providers changed response formats. ${RUN_URL}"
+          # AG-UI schema drift only
+          elif [ "$AGUI_DRIFT" = "true" ]; then
+            EMOJI="🚨"
+            MSG="*AG-UI schema drift detected* in aimock — canonical ag-ui types changed. ${RUN_URL}"
           # Infra failure — always notify
-          elif [ "$NOW" != "success" ]; then
+          elif [ "$INFRA_ERROR" = "true" ]; then
             EMOJI="❌"
-            MSG="*Drift tests failed* (infra error). <https://github.com/CopilotKit/aimock/actions/runs/${{ github.run_id }}|View run>"
+            MSG="*Drift tests failed* (infra error). ${RUN_URL}"
           # Recovery: previous was bad, now good — notify once
           elif [ "$PREV" = "failure" ]; then
             EMOJI="✅"
-            MSG="Drift tests passing again — all providers match."
+            MSG="Drift tests passing again — all providers and AG-UI schema match."
           # Good → good — stay quiet
           else
             exit 0
           fi
 
-          curl -s -X POST "$SLACK_WEBHOOK" \
+          PAYLOAD=$(jq -n --arg text "${EMOJI} ${MSG}" '{text: $text}')
+          curl -sf -X POST "$SLACK_WEBHOOK" \
             -H "Content-Type: application/json" \
-            -d "{\"text\": \"${EMOJI} ${MSG}\"}"
+            -d "$PAYLOAD"
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-
-      - name: Fail if critical drift detected
-        if: steps.drift.outputs.exit_code == '2'
-        run: exit 1

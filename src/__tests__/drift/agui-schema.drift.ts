@@ -48,11 +48,12 @@ function parseCanonicalEventTypes(source: string): string[] {
  * Extract field definitions from a Zod `.extend({...})` block body.
  */
 function extractExtendFields(extendBody: string): FieldInfo[] {
+  // Strip comment lines so they don't match as field definitions
+  const cleanBody = extendBody.replace(/^\s*\/\/.*$/gm, "");
   const fields: FieldInfo[] = [];
-  for (const fieldMatch of extendBody.matchAll(/(\w+)\s*:\s*([^\n,]+)/g)) {
+  for (const fieldMatch of cleanBody.matchAll(/(\w+)\s*:\s*(.+)/g)) {
     const fieldName = fieldMatch[1];
-    const fieldDef = fieldMatch[2].trim();
-    if (fieldDef.startsWith("//")) continue;
+    const fieldDef = fieldMatch[2].replace(/,\s*$/, "").trim();
     const optional = fieldDef.includes(".optional()") || fieldDef.includes(".default(");
     fields.push({ name: fieldName, optional });
   }
@@ -70,15 +71,30 @@ function extractExtendFields(extendBody: string): FieldInfo[] {
  *   TextMessageContentEventSchema.omit({...}).extend({...})
  * where ThinkingTextMessageContentEventSchema inherits delta from TextMessageContent.
  */
+
+/**
+ * Parse base fields from `BaseEventSchema = z.object({...})` in canonical source.
+ * Falls back to hardcoded defaults if parsing fails.
+ */
+function parseCanonicalBaseFields(source: string): FieldInfo[] {
+  const baseMatch = source.match(
+    /export const BaseEventSchema\s*=\s*z\s*\.\s*object\(\{([\s\S]*?)\}\)/,
+  );
+  if (!baseMatch) {
+    return [
+      { name: "type", optional: false },
+      { name: "timestamp", optional: true },
+      { name: "rawEvent", optional: true },
+    ];
+  }
+  return extractExtendFields(baseMatch[1]);
+}
+
 function parseCanonicalSchemas(source: string): Map<string, SchemaInfo> {
   const schemas = new Map<string, SchemaInfo>();
 
-  // Base event fields (always inherited)
-  const baseFields: FieldInfo[] = [
-    { name: "type", optional: false },
-    { name: "timestamp", optional: true },
-    { name: "rawEvent", optional: true },
-  ];
+  // Parse base event fields dynamically from BaseEventSchema
+  const baseFields = parseCanonicalBaseFields(source);
 
   // Pass 1: collect raw schema definitions keyed by schema name
   interface RawSchema {
@@ -123,6 +139,14 @@ function parseCanonicalSchemas(source: string): Map<string, SchemaInfo> {
     fieldsBySchemaName.set(schemaName, ownFields);
   }
 
+  // Recursive parent field resolver for multi-level inheritance chains
+  function resolveParentFields(schemaName: string): FieldInfo[] {
+    const entry = rawSchemas.get(schemaName);
+    if (!entry) return [];
+    const parentFields = entry.parentSchemaName ? resolveParentFields(entry.parentSchemaName) : [];
+    return [...parentFields, ...(fieldsBySchemaName.get(schemaName) || [])];
+  }
+
   // Pass 2: resolve full field sets with parent inheritance
   for (const [, raw] of rawSchemas) {
     const fields = new Map<string, FieldInfo>();
@@ -132,13 +156,10 @@ function parseCanonicalSchemas(source: string): Map<string, SchemaInfo> {
       fields.set(f.name, { ...f });
     }
 
-    // If there's a parent schema (not BaseEventSchema), inherit its extend fields
+    // Resolve full parent chain (handles multi-level inheritance)
     if (raw.parentSchemaName) {
-      const parentFields = fieldsBySchemaName.get(raw.parentSchemaName);
-      if (parentFields) {
-        for (const f of parentFields) {
-          fields.set(f.name, { ...f });
-        }
+      for (const f of resolveParentFields(raw.parentSchemaName)) {
+        fields.set(f.name, { ...f });
       }
     }
 
@@ -179,8 +200,33 @@ function parseAimockEventTypes(source: string): string[] {
   return members;
 }
 
+/**
+ * Parse base fields from `AGUIBaseEvent` interface in aimock source.
+ * Falls back to hardcoded defaults if parsing fails.
+ */
+function parseAimockBaseFields(source: string): FieldInfo[] {
+  const baseMatch = source.match(/export interface AGUIBaseEvent\s*\{([\s\S]*?)\}/);
+  if (!baseMatch) {
+    return [
+      { name: "type", optional: false },
+      { name: "timestamp", optional: true },
+      { name: "rawEvent", optional: true },
+    ];
+  }
+  const fields: FieldInfo[] = [];
+  for (const fieldMatch of baseMatch[1].matchAll(/(\w+)(\??)\s*:\s*([^;]+);/g)) {
+    const fieldName = fieldMatch[1];
+    const optional = fieldMatch[2] === "?";
+    fields.push({ name: fieldName, optional });
+  }
+  return fields;
+}
+
 function parseAimockInterfaces(source: string): Map<string, SchemaInfo> {
   const interfaces = new Map<string, SchemaInfo>();
+
+  // Parse base fields dynamically from AGUIBaseEvent interface
+  const baseFields = parseAimockBaseFields(source);
 
   // Match interface blocks
   const interfacePattern = /export interface AGUI(\w+Event)\s+extends\s+\w+\s*\{([\s\S]*?)\}/g;
@@ -193,12 +239,8 @@ function parseAimockInterfaces(source: string): Map<string, SchemaInfo> {
     if (!typeMatch) continue;
     const eventType = typeMatch[1];
 
-    // Start with base fields (all extend AGUIBaseEvent)
-    const fields: FieldInfo[] = [
-      { name: "type", optional: false },
-      { name: "timestamp", optional: true },
-      { name: "rawEvent", optional: true },
-    ];
+    // Start with dynamically-parsed base fields
+    const fields: FieldInfo[] = baseFields.map((f) => ({ ...f }));
 
     // Parse fields from the interface body
     for (const fieldMatch of body.matchAll(/(\w+)(\??)\s*:\s*([^;]+);/g)) {
@@ -235,7 +277,7 @@ interface DriftItem {
 const canonicalExists = fs.existsSync(CANONICAL_EVENTS_PATH);
 const aimockExists = fs.existsSync(AIMOCK_TYPES_PATH);
 
-describe.skipIf(!canonicalExists)("AG-UI schema drift", () => {
+describe.skipIf(!canonicalExists || !aimockExists)("AG-UI schema drift", () => {
   let canonicalSource: string;
   let aimockSource: string;
   let canonicalTypes: string[];

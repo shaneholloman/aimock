@@ -12,7 +12,8 @@ import type { Logger } from "./logger.js";
  * SSE event stream as a fixture on disk and in memory, and relay the
  * response back to the original client in real time.
  *
- * Returns `true` if the request was proxied, `false` if no upstream is configured.
+ * Returns the HTTP status code written to the client if the request was proxied,
+ * or `false` if no upstream is configured.
  */
 export async function proxyAndRecordAGUI(
   req: http.IncomingMessage,
@@ -21,7 +22,7 @@ export async function proxyAndRecordAGUI(
   fixtures: AGUIFixture[],
   config: AGUIRecordConfig,
   logger: Logger,
-): Promise<boolean> {
+): Promise<number | false> {
   if (!config.upstream) {
     logger.warn("No upstream URL configured for AG-UI recording — cannot proxy");
     return false;
@@ -34,7 +35,7 @@ export async function proxyAndRecordAGUI(
     logger.error(`Invalid upstream AG-UI URL: ${config.upstream}`);
     res.writeHead(502, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Invalid upstream AG-UI URL" }));
-    return true;
+    return 502;
   }
 
   logger.warn(`NO AG-UI FIXTURE MATCH — proxying to ${config.upstream}`);
@@ -58,8 +59,9 @@ export async function proxyAndRecordAGUI(
 
   const requestBody = JSON.stringify(input);
 
+  let status: number;
   try {
-    await teeUpstreamStream(
+    status = await teeUpstreamStream(
       target,
       forwardHeaders,
       requestBody,
@@ -76,9 +78,10 @@ export async function proxyAndRecordAGUI(
       res.writeHead(502, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Upstream AG-UI agent unreachable" }));
     }
+    status = 502;
   }
 
-  return true;
+  return status;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +97,7 @@ function teeUpstreamStream(
   fixtures: AGUIFixture[],
   config: AGUIRecordConfig,
   logger: Logger,
-): Promise<void> {
+): Promise<number> {
   return new Promise((resolve, reject) => {
     const transport = target.protocol === "https:" ? https : http;
     const UPSTREAM_TIMEOUT_MS = 30_000;
@@ -110,9 +113,11 @@ function teeUpstreamStream(
         },
       },
       (upstreamRes) => {
+        const upstreamStatus = upstreamRes.statusCode ?? 200;
+
         // Set SSE headers on the client response
         if (!clientRes.headersSent) {
-          clientRes.writeHead(upstreamRes.statusCode ?? 200, {
+          clientRes.writeHead(upstreamStatus, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
             Connection: "keep-alive",
@@ -151,19 +156,33 @@ function teeUpstreamStream(
 
           // Build fixture
           const message = extractLastUserMessage(input);
-          if (!message) {
-            logger.warn("Recorded AG-UI fixture has no message match — it will match ALL requests");
-          }
           const fixture: AGUIFixture = {
-            match: { message: message || undefined },
+            match: message
+              ? { message }
+              : {
+                  predicate: (inp: AGUIRunAgentInput) =>
+                    !inp.messages?.length || !inp.messages.some((m) => m.role === "user"),
+                },
             events,
           };
+          if (!message) {
+            logger.warn(
+              "Recorded AG-UI fixture has no user message — will use __NO_USER_MESSAGE__ sentinel on disk",
+            );
+          }
 
           if (!config.proxyOnly) {
             // Register in memory first (always available even if disk write fails)
             fixtures.push(fixture);
 
-            // Write to disk
+            // Write to disk — predicate functions are not serializable,
+            // so replace with a sentinel string that won't match real user messages.
+            const serializableFixture = {
+              match: fixture.match.predicate ? { message: "__NO_USER_MESSAGE__" } : fixture.match,
+              events: fixture.events,
+              ...(fixture.delayMs !== undefined ? { delayMs: fixture.delayMs } : {}),
+            };
+
             const fixturePath = config.fixturePath ?? "./fixtures/agui-recorded";
             const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
             const filename = `agui-${timestamp}-${crypto.randomUUID().slice(0, 8)}.json`;
@@ -173,11 +192,7 @@ function teeUpstreamStream(
               fs.mkdirSync(fixturePath, { recursive: true });
               fs.writeFileSync(
                 filepath,
-                JSON.stringify(
-                  { fixtures: [{ match: fixture.match, events: fixture.events }] },
-                  null,
-                  2,
-                ),
+                JSON.stringify({ fixtures: [serializableFixture] }, null, 2),
                 "utf-8",
               );
               logger.warn(`AG-UI response recorded → ${filepath}`);
@@ -191,7 +206,7 @@ function teeUpstreamStream(
             logger.info("Proxied AG-UI request (proxy-only mode)");
           }
 
-          resolve();
+          resolve(upstreamStatus);
         });
       },
     );
@@ -227,12 +242,13 @@ function parseSSEEvents(text: string, logger?: Logger): AGUIEvent[] {
   for (const block of blocks) {
     const lines = block.split("\n");
     for (const line of lines) {
-      if (line.startsWith("data: ")) {
+      if (line.startsWith("data:")) {
+        const payload = line.startsWith("data: ") ? line.slice(6) : line.slice(5);
         try {
-          const parsed = JSON.parse(line.slice(6)) as AGUIEvent;
+          const parsed = JSON.parse(payload) as AGUIEvent;
           events.push(parsed);
         } catch {
-          logger?.warn(`Skipping unparseable SSE data line: ${line.slice(0, 200)}`);
+          logger?.warn(`Skipping unparseable SSE data line: ${payload.slice(0, 200)}`);
         }
       }
     }

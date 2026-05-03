@@ -13,6 +13,7 @@ import type {
   AGUIMessage,
   AGUIRunStartedEvent,
   AGUIRunFinishedEvent,
+  AGUIRunFinishedOutcome,
   AGUIRunErrorEvent,
   AGUITextMessageStartEvent,
   AGUITextMessageContentEvent,
@@ -21,6 +22,7 @@ import type {
   AGUIToolCallStartEvent,
   AGUIToolCallArgsEvent,
   AGUIToolCallEndEvent,
+  AGUIToolCallChunkEvent,
   AGUIToolCallResultEvent,
   AGUIStateSnapshotEvent,
   AGUIStateDeltaEvent,
@@ -31,8 +33,14 @@ import type {
   AGUIReasoningMessageStartEvent,
   AGUIReasoningMessageContentEvent,
   AGUIReasoningMessageEndEvent,
+  AGUIReasoningMessageChunkEvent,
   AGUIReasoningEndEvent,
+  AGUIReasoningEncryptedValueEvent,
+  AGUIReasoningEncryptedValueSubtype,
   AGUIActivitySnapshotEvent,
+  AGUIActivityDeltaEvent,
+  AGUIRawEvent,
+  AGUICustomEvent,
 } from "./agui-types.js";
 
 // ─── Matching functions ──────────────────────────────────────────────────────
@@ -61,6 +69,7 @@ export function matchesFixture(input: AGUIRunAgentInput, match: AGUIFixtureMatch
     if (typeof match.message === "string") {
       if (!text.includes(match.message)) return false;
     } else {
+      match.message.lastIndex = 0;
       if (!match.message.test(text)) return false;
     }
   }
@@ -121,11 +130,16 @@ function makeRunStarted(opts?: AGUIBuildOpts): AGUIRunStartedEvent {
   };
 }
 
-function makeRunFinished(started: AGUIRunStartedEvent): AGUIRunFinishedEvent {
+function makeRunFinished(
+  started: AGUIRunStartedEvent,
+  finishOpts?: { outcome?: AGUIRunFinishedOutcome; result?: unknown },
+): AGUIRunFinishedEvent {
   return {
     type: "RUN_FINISHED",
     threadId: started.threadId,
     runId: started.runId,
+    ...(finishOpts?.result !== undefined ? { result: finishOpts.result } : {}),
+    ...(finishOpts?.outcome !== undefined ? { outcome: finishOpts.outcome } : {}),
   };
 }
 
@@ -405,7 +419,136 @@ export function buildCompositeResponse(
     }
   }
 
-  return [started, ...inner, makeRunFinished(started)];
+  const hasError = inner.some((e) => e.type === "RUN_ERROR");
+  return [started, ...inner, ...(hasError ? [] : [makeRunFinished(started)])];
+}
+
+// ─── Convenience event builders ─────────────────────────────────────────────
+
+/**
+ * Build an activity delta response (JSON Patch on an activity).
+ * [RUN_STARTED, ACTIVITY_DELTA, RUN_FINISHED]
+ */
+export function buildActivityDelta(
+  messageId: string,
+  activityType: string,
+  patch: unknown[],
+  opts?: AGUIBuildOpts,
+): AGUIEvent[] {
+  const started = makeRunStarted(opts);
+  return [
+    started,
+    {
+      type: "ACTIVITY_DELTA",
+      messageId,
+      activityType,
+      patch,
+    } as AGUIActivityDeltaEvent,
+    makeRunFinished(started),
+  ];
+}
+
+/**
+ * Build a tool call chunk response (single chunk, no start/end envelope).
+ * [RUN_STARTED, TOOL_CALL_CHUNK, RUN_FINISHED]
+ */
+export function buildToolCallChunk(
+  delta: string,
+  opts?: AGUIBuildOpts & {
+    toolCallId?: string;
+    toolCallName?: string;
+    parentMessageId?: string;
+  },
+): AGUIEvent[] {
+  const started = makeRunStarted(opts);
+  return [
+    started,
+    {
+      type: "TOOL_CALL_CHUNK",
+      ...(opts?.toolCallId !== undefined ? { toolCallId: opts.toolCallId } : {}),
+      ...(opts?.toolCallName !== undefined ? { toolCallName: opts.toolCallName } : {}),
+      ...(opts?.parentMessageId !== undefined ? { parentMessageId: opts.parentMessageId } : {}),
+      delta,
+    } as AGUIToolCallChunkEvent,
+    makeRunFinished(started),
+  ];
+}
+
+/**
+ * Build a raw event response.
+ * [RUN_STARTED, RAW, RUN_FINISHED]
+ */
+export function buildRawEvent(event: unknown, source?: string, opts?: AGUIBuildOpts): AGUIEvent[] {
+  const started = makeRunStarted(opts);
+  return [
+    started,
+    {
+      type: "RAW",
+      event,
+      ...(source !== undefined ? { source } : {}),
+    } as AGUIRawEvent,
+    makeRunFinished(started),
+  ];
+}
+
+/**
+ * Build a custom event response.
+ * [RUN_STARTED, CUSTOM, RUN_FINISHED]
+ */
+export function buildCustomEvent(name: string, value: unknown, opts?: AGUIBuildOpts): AGUIEvent[] {
+  const started = makeRunStarted(opts);
+  return [
+    started,
+    {
+      type: "CUSTOM",
+      name,
+      value,
+    } as AGUICustomEvent,
+    makeRunFinished(started),
+  ];
+}
+
+/**
+ * Build a reasoning message chunk response (single chunk, no start/end envelope).
+ * [RUN_STARTED, REASONING_MESSAGE_CHUNK, RUN_FINISHED]
+ */
+export function buildReasoningChunk(
+  delta: string,
+  opts?: AGUIBuildOpts & { messageId?: string },
+): AGUIEvent[] {
+  const started = makeRunStarted(opts);
+  return [
+    started,
+    {
+      type: "REASONING_MESSAGE_CHUNK",
+      ...(opts?.messageId !== undefined ? { messageId: opts.messageId } : {}),
+      delta,
+    } as AGUIReasoningMessageChunkEvent,
+    makeRunFinished(started),
+  ];
+}
+
+/**
+ * Build a reasoning encrypted value event response.
+ * [RUN_STARTED, REASONING_ENCRYPTED_VALUE, RUN_FINISHED]
+ */
+export function buildReasoningEncryptedValue(
+  subtype: AGUIReasoningEncryptedValueSubtype,
+  entityId: string,
+  encryptedValue: string,
+  opts?: AGUIBuildOpts,
+): AGUIEvent[] {
+  const started = makeRunStarted(opts);
+  return [
+    started,
+    {
+      type: "REASONING_ENCRYPTED_VALUE",
+      subtype,
+      entityId,
+      encryptedValue,
+    } as AGUIReasoningEncryptedValueEvent,
+    makeRunFinished(started),
+  ];
 }
 
 // ─── SSE writer ──────────────────────────────────────────────────────────────
@@ -432,11 +575,16 @@ export async function writeAGUIEventStream(
     if (opts?.signal?.aborted) break;
     if (res.socket?.destroyed) break;
 
-    const stamped = { ...event, timestamp: Date.now() };
+    const stamped = { ...event, timestamp: event.timestamp ?? Date.now() };
     try {
       res.write(`data: ${JSON.stringify(stamped)}\n\n`);
-    } catch {
-      break; // client disconnected or stream error — stop writing
+    } catch (err) {
+      if (err instanceof TypeError || err instanceof RangeError) {
+        console.warn("AG-UI SSE write failed (serialization):", (err as Error).message);
+      } else if (err instanceof Error) {
+        console.warn("AG-UI SSE write failed:", err.message);
+      }
+      break;
     }
 
     if (delayMs > 0) {

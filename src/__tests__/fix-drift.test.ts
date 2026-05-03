@@ -398,8 +398,9 @@ describe("buildPrompt", () => {
     const prompt = buildPrompt(report);
 
     expect(prompt).toContain("Path: body.model");
+    expect(prompt).toContain("SDK type: string");
     expect(prompt).toContain('Real API: "gpt-4o"');
-    expect(prompt).toContain('Mock: "gpt-4"');
+    expect(prompt).toContain('Mock:     "gpt-4"');
   });
 });
 
@@ -794,6 +795,9 @@ describe("BUILDER_TO_SKILL_SECTION", () => {
       "src/ws-realtime.ts",
       "src/ws-responses.ts",
       "src/ws-gemini-live.ts",
+      "src/helpers.ts",
+      "src/agui-types.ts",
+      "src/agui-handler.ts",
     ];
     for (const file of expectedFiles) {
       expect(BUILDER_TO_SKILL_SECTION).toHaveProperty(file);

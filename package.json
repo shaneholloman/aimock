@@ -86,6 +86,16 @@
         "default": "./dist/vector-stub.cjs"
       }
     },
+    "./agui": {
+      "import": {
+        "types": "./dist/agui-stub.d.ts",
+        "default": "./dist/agui-stub.js"
+      },
+      "require": {
+        "types": "./dist/agui-stub.d.cts",
+        "default": "./dist/agui-stub.cjs"
+      }
+    },
     "./vitest": {
       "import": {
         "types": "./dist/vitest.d.ts",
@@ -123,6 +133,10 @@
       "vector": [
         "./dist/vector-stub.d.ts",
         "./dist/vector-stub.d.cts"
+      ],
+      "agui": [
+        "./dist/agui-stub.d.ts",
+        "./dist/agui-stub.d.cts"
       ],
       "vitest": [
         "./dist/vitest.d.ts",
