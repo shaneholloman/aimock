@@ -10,6 +10,10 @@
 - **`./agui` subpath export** — `agui-stub.ts` wired into `tsdown.config.ts` and `package.json` exports, matching `./a2a`, `./mcp`, `./vector` pattern.
 - **Complete AG-UI type exports** — All event types (reasoning, step, thinking, raw, custom, chunk), `AGUIBuildOpts`, `matchesAGUIFixture`, `AGUIReasoningEncryptedValueSubtype`, `AGUIMessageRole` now exported from package root.
 - **`"warn"` log level** — New log level between `"silent"` and `"info"` with proper hierarchy. `AGUIMockOptions.logLevel` option added; AG-UI mock defaults to `"warn"` instead of `"silent"`.
+- **Non-speech audio generation** — Mock support for ElevenLabs sound effects (`/v1/sound-generation`) and music (`/v1/music/*`), fal.ai queue-based audio (`/fal/queue/submit/*`, `/fal/queue/requests/*`, `/fal/run/*`), Gemini HTTP audio via `generateContent`/`streamGenerateContent` with `inlineData` audio parts, and Gemini Live WebSocket audio. Convenience methods: `onAudio()`, `onSoundEffect()`, `onMusic()`, `onFalAudio()`. (PR #140, closes #118)
+- **AudioResponse broadened** — `audio` field now supports both `string` (base64) and `{ b64Json, contentType }` object form
+- **Gemini audio recording** — Record and replay Gemini audio responses (both streaming SSE and non-streaming JSON)
+- **Router audio-gen filtering** — Bidirectional endpoint filtering for `audio-gen` and `fal-audio` endpoint types
 
 ### Fixed
 

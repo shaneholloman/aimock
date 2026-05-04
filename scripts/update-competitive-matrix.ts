@@ -92,6 +92,18 @@ const FEATURE_RULES: FeatureRule[] = [
     ],
   },
   {
+    rowLabel: "Non-speech audio",
+    keywords: [
+      "sound-generation",
+      "sound effect",
+      "music generation",
+      "elevenlabs",
+      "fal.ai",
+      "audio generation",
+      "non-speech audio",
+    ],
+  },
+  {
     rowLabel: "Video generation",
     keywords: ["sora", "/v1/videos", "video generation", "generate.*video"],
   },
@@ -236,6 +248,7 @@ function countProviders(text: string): number {
     ["openai"],
     ["claude", "anthropic"],
     ["gemini", "google.*ai"],
+    ["gemini.*interactions"],
     ["bedrock", "aws"],
     ["azure"],
     ["vertex"],
