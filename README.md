@@ -2,7 +2,7 @@
 
 https://github.com/user-attachments/assets/646bf106-0320-41f2-a9b1-5090454830f3
 
-Mock infrastructure for AI application testing — LLM APIs, image generation, text-to-speech, transcription, video generation, MCP tools, A2A agents, AG-UI event streams, vector databases, search, rerank, and moderation. One package, one port, zero dependencies.
+Mock infrastructure for AI application testing — LLM APIs, image generation, text-to-speech, transcription, audio generation, video generation, MCP tools, A2A agents, AG-UI event streams, vector databases, search, rerank, and moderation. One package, one port, zero dependencies.
 
 ## Quick Start
 
