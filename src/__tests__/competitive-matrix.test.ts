@@ -57,6 +57,18 @@ const FEATURE_RULES: FeatureRule[] = [
     keywords: ["dall-e", "dalle", "/v1/images", "image generation", "imagen", "generate.*image"],
   },
   {
+    rowLabel: "Non-speech audio",
+    keywords: [
+      "sound-generation",
+      "sound effect",
+      "music generation",
+      "elevenlabs",
+      "fal.ai",
+      "audio generation",
+      "non-speech audio",
+    ],
+  },
+  {
     rowLabel: "Video generation",
     keywords: ["sora", "/v1/videos", "video generation", "generate.*video"],
   },
