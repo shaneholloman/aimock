@@ -74,7 +74,15 @@ export interface FixtureMatch {
   sequenceIndex?: number;
   turnIndex?: number;
   hasToolResult?: boolean;
-  endpoint?: "chat" | "image" | "speech" | "transcription" | "video" | "embedding";
+  endpoint?:
+    | "chat"
+    | "image"
+    | "speech"
+    | "transcription"
+    | "video"
+    | "embedding"
+    | "audio-gen"
+    | "fal-audio";
 }
 
 // Fixture response types
@@ -157,7 +165,7 @@ export interface ImageResponse {
 }
 
 export interface AudioResponse {
-  audio: string;
+  audio: string | { b64Json: string; contentType?: string };
   format?: string;
 }
 
@@ -281,7 +289,15 @@ export interface FixtureFileEntry {
     sequenceIndex?: number;
     turnIndex?: number;
     hasToolResult?: boolean;
-    endpoint?: "chat" | "image" | "speech" | "transcription" | "video" | "embedding";
+    endpoint?:
+      | "chat"
+      | "image"
+      | "speech"
+      | "transcription"
+      | "video"
+      | "embedding"
+      | "audio-gen"
+      | "fal-audio";
     // predicate not supported in JSON files
   };
   response: FixtureFileResponse;
@@ -381,7 +397,9 @@ export type RecordProviderKey =
   | "bedrock"
   | "azure"
   | "ollama"
-  | "cohere";
+  | "cohere"
+  | "elevenlabs"
+  | "fal";
 
 export interface RecordConfig {
   providers: Partial<Record<RecordProviderKey, string>>;
