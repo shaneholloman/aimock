@@ -18,6 +18,7 @@ import {
   isAudioResponse,
   isTranscriptionResponse,
   isVideoResponse,
+  isJSONResponse,
 } from "./helpers.js";
 import type { Logger } from "./logger.js";
 
@@ -250,13 +251,14 @@ export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
       !isImageResponse(response) &&
       !isAudioResponse(response) &&
       !isTranscriptionResponse(response) &&
-      !isVideoResponse(response)
+      !isVideoResponse(response) &&
+      !isJSONResponse(response)
     ) {
       results.push({
         severity: "error",
         fixtureIndex: i,
         message:
-          "response is not a recognized type (must have content, toolCalls, error, embedding, image, audio, transcription, or video)",
+          "response is not a recognized type (must have content, toolCalls, error, embedding, image, audio, transcription, video, or json)",
       });
     }
 
