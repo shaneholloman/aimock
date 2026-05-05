@@ -1,10 +1,15 @@
 # @copilotkit/aimock
 
-## [Unreleased]
+## [1.18.0] - 2026-05-04
 
 ### Added
 
 - **Chaos testing in proxy mode** — Pre-flight chaos (drop/disconnect) prevents upstream contact; post-response chaos (malformed) corrupts relay body after recording the real upstream response. SSE bypass tracked via `aimock_chaos_bypassed_total` metric. Explicit `source` label (`fixture`/`proxy`/`internal`) on all chaos Prometheus counters and journal entries.
+- **fal.ai as first-class provider** — General fal.ai handler (`src/fal.ts`) supporting arbitrary JSON request/response payloads (image, video, motion, music, etc.) alongside the existing audio-only `fal-audio.ts`. Routes by `x-fal-target-host` header. Queue lifecycle (submit→status→result→cancel), sync run, storage upload stub. `RawJSONResponse` type for verbatim JSON fixture preservation. Convenience methods `onFalQueue()` and `onFalRun()`. Record and replay support. (PR #153, tombeckenham)
+
+### Fixed
+
+- **Fixture validation for RawJSONResponse** — `validateFixtures()` now recognizes `RawJSONResponse`, fixing the record→restart→replay cycle for fal.ai fixtures loaded from disk
 
 ## [1.17.0] - 2026-05-04
 
