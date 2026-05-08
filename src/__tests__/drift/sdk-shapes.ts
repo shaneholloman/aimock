@@ -181,6 +181,7 @@ export function openaiResponsesTextEventShapes(): SSEEventShape[] {
       type: "response.content_part.added",
       dataShape: extractShape({
         type: "response.content_part.added",
+        item_id: "msg_abc123",
         output_index: 0,
         content_index: 0,
         part: { type: "output_text", text: "" },
@@ -200,6 +201,7 @@ export function openaiResponsesTextEventShapes(): SSEEventShape[] {
       type: "response.output_text.done",
       dataShape: extractShape({
         type: "response.output_text.done",
+        item_id: "msg_abc123",
         output_index: 0,
         content_index: 0,
         text: "Hello!",
@@ -209,6 +211,7 @@ export function openaiResponsesTextEventShapes(): SSEEventShape[] {
       type: "response.content_part.done",
       dataShape: extractShape({
         type: "response.content_part.done",
+        item_id: "msg_abc123",
         output_index: 0,
         content_index: 0,
         part: { type: "output_text", text: "Hello!" },
