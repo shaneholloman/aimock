@@ -1,6 +1,6 @@
 # @copilotkit/aimock
 
-## Unreleased — Provider Spec Conformance Audit
+## [1.19.5] - 2026-05-09
 
 ### Fixed
 
