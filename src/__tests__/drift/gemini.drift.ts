@@ -8,7 +8,7 @@ import http from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type ServerInstance } from "../../server.js";
 import type { Fixture } from "../../types.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 import {
   geminiContentResponseShape,
   geminiToolCallResponseShape,
@@ -58,9 +58,10 @@ describe.skipIf(!GOOGLE_API_KEY)("Google Gemini drift", () => {
     const diffs = triangulate(sdkShape, realShape, mockShape);
     const report = formatDriftReport("Gemini (non-streaming text)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("streaming text shape matches", async () => {
@@ -87,9 +88,10 @@ describe.skipIf(!GOOGLE_API_KEY)("Google Gemini drift", () => {
       const diffs = triangulate(sdkChunkShape, realChunkShape, mockChunkShape);
       const report = formatDriftReport("Gemini (streaming intermediate chunk)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
 
     // Compare last chunk
@@ -99,9 +101,10 @@ describe.skipIf(!GOOGLE_API_KEY)("Google Gemini drift", () => {
     const lastDiffs = triangulate(sdkLastShape, realLastShape, mockLastShape);
     const lastReport = formatDriftReport("Gemini (streaming last chunk)", lastDiffs);
 
-    if (shouldFail(lastDiffs)) {
-      expect.soft([], lastReport).toEqual(lastDiffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      lastDiffs.filter((d) => d.severity === "critical"),
+      lastReport,
+    ).toEqual([]);
   });
 
   it("non-streaming tool call shape matches", async () => {
@@ -139,9 +142,10 @@ describe.skipIf(!GOOGLE_API_KEY)("Google Gemini drift", () => {
     const diffs = triangulate(sdkShape, realShape, mockShape);
     const report = formatDriftReport("Gemini (non-streaming tool call)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("streaming tool call shape matches", async () => {
@@ -184,9 +188,10 @@ describe.skipIf(!GOOGLE_API_KEY)("Google Gemini drift", () => {
     const diffs = triangulate(sdkLastShape, realLastShape, mockLastShape);
     const report = formatDriftReport("Gemini (streaming tool call)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });
 
@@ -285,9 +290,10 @@ describe("Gemini error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Gemini (RESOURCE_EXHAUSTED error)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
 
     // Validate the concrete error envelope fields
     expect(body).toHaveProperty("error");
@@ -314,9 +320,10 @@ describe("Gemini error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Gemini (NOT_FOUND error)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
 
     expect(body.error.code).toBe(404);
     expect(body.error.status).toBe("NOT_FOUND");
@@ -339,9 +346,10 @@ describe("Gemini error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Gemini (INVALID_ARGUMENT error)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
 
     expect(body.error.code).toBe(400);
     expect(body.error.status).toBe("INVALID_ARGUMENT");
@@ -386,9 +394,10 @@ describe("Gemini error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Gemini (no-fixture-match error)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
 
     expect(body.error.code).toBe(404);
     expect(body.error.status).toBe("NOT_FOUND");
@@ -426,9 +435,10 @@ describe("Gemini error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Gemini (malformed JSON error)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
 
     expect(body.error.code).toBe(400);
     expect(body.error.status).toBe("INVALID_ARGUMENT");
@@ -478,9 +488,10 @@ describe("Gemini thinking token shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Gemini (non-streaming thinking)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
 
     // Structural assertions: thinking part precedes content part
     const parts = body.candidates[0].content.parts as { text: string; thought?: boolean }[];
@@ -553,11 +564,10 @@ describe("Gemini thinking token shapes", () => {
     );
     const thinkingReport = formatDriftReport("Gemini (streaming thinking chunk)", thinkingDiffs);
 
-    if (shouldFail(thinkingDiffs)) {
-      expect
-        .soft([], thinkingReport)
-        .toEqual(thinkingDiffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      thinkingDiffs.filter((d) => d.severity === "critical"),
+      thinkingReport,
+    ).toEqual([]);
 
     // Content chunk shape matches SDK expectation
     const mockContentShape = extractShape(contentChunks[0]);
@@ -567,9 +577,10 @@ describe("Gemini thinking token shapes", () => {
       contentDiffs,
     );
 
-    if (shouldFail(contentDiffs)) {
-      expect.soft([], contentReport).toEqual(contentDiffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      contentDiffs.filter((d) => d.severity === "critical"),
+      contentReport,
+    ).toEqual([]);
 
     // Verify reassembled text
     const allThinkingText = thinkingChunks

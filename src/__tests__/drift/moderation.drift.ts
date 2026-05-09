@@ -11,7 +11,7 @@
 import http from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { ServerInstance } from "../../server.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 import { openaiModerationResponseShape } from "./sdk-shapes.js";
 import { httpPost, startDriftServer, stopDriftServer } from "./helpers.js";
 
@@ -53,9 +53,10 @@ describe("OpenAI Moderations drift", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("OpenAI Moderations", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("moderation result contains all required category fields", async () => {

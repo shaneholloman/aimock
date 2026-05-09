@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { ServerInstance } from "../../server.js";
-import { compareSSESequences, formatDriftReport, shouldFail } from "./schema.js";
+import { compareSSESequences, formatDriftReport } from "./schema.js";
 import {
   openaiResponsesTextEventShapes,
   openaiResponsesToolCallEventShapes,
@@ -65,9 +65,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Responses WS drift", () => {
     const diffs = compareSSESequences(sdkEvents, realResult.events, mockResult.events);
     const report = formatDriftReport("OpenAI Responses WS (text events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("WS tool call event sequence matches", async () => {
@@ -120,8 +121,9 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Responses WS drift", () => {
     const diffs = compareSSESequences(sdkEvents, realResult.events, mockResult.events);
     const report = formatDriftReport("OpenAI Responses WS (tool call events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });

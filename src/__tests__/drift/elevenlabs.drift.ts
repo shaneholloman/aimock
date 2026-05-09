@@ -18,7 +18,7 @@ import http from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type ServerInstance } from "../../server.js";
 import type { Fixture } from "../../types.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 
 // ---------------------------------------------------------------------------
 // Credentials check
@@ -176,9 +176,10 @@ describe("ElevenLabs drift — sound generation", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("ElevenLabs /v1/sound-generation 400 error", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it.skipIf(!HAS_CREDENTIALS)(
@@ -242,9 +243,10 @@ describe("ElevenLabs drift — music endpoints", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("ElevenLabs /v1/music/plan", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("/v1/music missing prompt returns 400 with error shape", async () => {
@@ -265,9 +267,10 @@ describe("ElevenLabs drift — music endpoints", () => {
     const diffs = triangulate(expectedShape, expectedShape, mockShape);
     const report = formatDriftReport("ElevenLabs /v1/music 400 error", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("/v1/music song-id header absent on plan endpoint", async () => {

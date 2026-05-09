@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { ServerInstance } from "../../server.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 import { httpPost, startDriftServer, stopDriftServer } from "./helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -144,9 +144,10 @@ describe.skipIf(!OLLAMA_REACHABLE)("Ollama drift", () => {
       const diffs = triangulate(sdkShape, realShape, mockShape);
       const report = formatDriftReport("Ollama /api/chat", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 
@@ -181,9 +182,10 @@ describe.skipIf(!OLLAMA_REACHABLE)("Ollama drift", () => {
       const diffs = triangulate(sdkChunkShape, realFirstShape, mockFirstShape);
       const report = formatDriftReport("Ollama /api/chat (streaming chunk)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 
@@ -211,9 +213,10 @@ describe.skipIf(!OLLAMA_REACHABLE)("Ollama drift", () => {
       const diffs = triangulate(sdkShape, realShape, mockShape);
       const report = formatDriftReport("Ollama /api/generate", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 });

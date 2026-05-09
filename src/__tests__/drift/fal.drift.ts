@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import http from "node:http";
 import { LLMock } from "../../llmock.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 
 // ---------------------------------------------------------------------------
 // Server lifecycle
@@ -144,9 +144,10 @@ describe("fal.ai sync-run response shape", () => {
     const diffs = triangulate(expectedShape, expectedShape, mockShape);
     const report = formatDriftReport("fal.ai sync-run (image payload)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("RawJSONResponse passthrough works for arbitrary payload shapes", async () => {
@@ -169,8 +170,9 @@ describe("fal.ai sync-run response shape", () => {
     const diffs = triangulate(expectedShape, expectedShape, mockShape);
     const report = formatDriftReport("fal.ai sync-run (flat payload)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });

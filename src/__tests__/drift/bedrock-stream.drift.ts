@@ -9,7 +9,7 @@ import http from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type ServerInstance } from "../../server.js";
 import type { Fixture } from "../../types.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 import { httpPost, startDriftServer, stopDriftServer } from "./helpers.js";
 import {
   bedrockConverseStreamEventShapes,
@@ -203,9 +203,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Bedrock drift", () => {
       const diffs = triangulate(sdkShape, sdkShape, mockShape);
       const report = formatDriftReport("Bedrock Invoke", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 
@@ -262,9 +263,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Bedrock drift", () => {
       const diffs = triangulate(sdkEvent.dataShape, sdkEvent.dataShape, mockEvent.dataShape);
       const report = formatDriftReport(`Bedrock InvokeStream:${sdkEvent.type}`, diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 
@@ -291,9 +293,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Bedrock drift", () => {
       const diffs = triangulate(sdkShape, sdkShape, mockShape);
       const report = formatDriftReport("Bedrock Converse", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 
@@ -396,9 +399,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Bedrock drift", () => {
       const diffs = triangulate(sdkEvent.dataShape, sdkEvent.dataShape, mockEvent.dataShape);
       const report = formatDriftReport(`Bedrock ConverseStream:${sdkEvent.type}`, diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 
@@ -480,9 +484,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Bedrock drift", () => {
       const diffs = triangulate(sdkEvent.dataShape, sdkEvent.dataShape, mockEvent.dataShape);
       const report = formatDriftReport(`Bedrock ConverseStream Tool:${sdkEvent.type}`, diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 
@@ -594,9 +599,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Bedrock drift", () => {
           diffs,
         );
 
-        if (shouldFail(diffs)) {
-          expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-        }
+        expect(
+          diffs.filter((d) => d.severity === "critical"),
+          report,
+        ).toEqual([]);
       }
     } finally {
       await new Promise<void>((r) => reasoningInstance.server.close(() => r()));

@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { ServerInstance } from "../../server.js";
 import { createServer } from "../../server.js";
 import type { Fixture } from "../../types.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 import {
   openaiChatCompletionShape,
   openaiChatCompletionToolCallShape,
@@ -60,9 +60,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Chat Completions drift", () => {
     const diffs = triangulate(sdkShape, realShape, mockShape);
     const report = formatDriftReport("OpenAI Chat (non-streaming text)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("streaming text shape matches", async () => {
@@ -88,9 +89,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Chat Completions drift", () => {
     const diffs = triangulate(sdkChunkShape, realChunkShape, mockChunkShape);
     const report = formatDriftReport("OpenAI Chat (streaming text chunks)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("non-streaming tool call shape matches", async () => {
@@ -127,9 +129,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Chat Completions drift", () => {
     const diffs = triangulate(sdkShape, realShape, mockShape);
     const report = formatDriftReport("OpenAI Chat (non-streaming tool call)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("streaming tool call shape matches", async () => {
@@ -171,9 +174,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Chat Completions drift", () => {
     const diffs = triangulate(sdkChunkShape, realChunkShape, mockChunkShape);
     const report = formatDriftReport("OpenAI Chat (streaming tool call chunks)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });
 
@@ -237,9 +241,10 @@ describe("OpenAI Chat Completions error shapes", () => {
       const diffs = triangulate(sdkShape, sdkShape, mockShape);
       const report = formatDriftReport("OpenAI Chat error fixture (400)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     } finally {
       await new Promise<void>((r) => errorInstance.server.close(() => r()));
     }
@@ -271,9 +276,10 @@ describe("OpenAI Chat Completions error shapes", () => {
       const diffs = triangulate(sdkShape, sdkShape, mockShape);
       const report = formatDriftReport("OpenAI Chat no-fixture-match (404)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     } finally {
       await new Promise<void>((r) => emptyInstance.server.close(() => r()));
     }
@@ -326,9 +332,10 @@ describe("OpenAI Chat Completions error shapes", () => {
       const diffs = triangulate(sdkShape, sdkShape, mockShape);
       const report = formatDriftReport("OpenAI Chat malformed JSON (400)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     } finally {
       await new Promise<void>((r) => malformedInstance.server.close(() => r()));
     }
@@ -382,9 +389,10 @@ describe("OpenAI Chat Completions reasoning shapes", () => {
       const diffs = triangulate(sdkShape, sdkShape, mockShape);
       const report = formatDriftReport("OpenAI Chat (non-streaming reasoning)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     } finally {
       await new Promise<void>((r) => reasoningInstance.server.close(() => r()));
     }
@@ -456,9 +464,10 @@ describe("OpenAI Chat Completions reasoning shapes", () => {
       const diffs = triangulate(sdkChunkShape, sdkChunkShape, mockChunkShape);
       const report = formatDriftReport("OpenAI Chat (streaming reasoning chunks)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     } finally {
       await new Promise<void>((r) => reasoningInstance.server.close(() => r()));
     }

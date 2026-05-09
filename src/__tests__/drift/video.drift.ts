@@ -11,7 +11,7 @@ import http from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type ServerInstance } from "../../server.js";
 import type { Fixture } from "../../types.js";
-import { extractShape, compareShapes, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, compareShapes, formatDriftReport } from "./schema.js";
 import { httpPost } from "./helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -129,9 +129,10 @@ describe("Video API drift", () => {
       const diffs = compareShapes(expected, mockShape);
       const report = formatDriftReport("Video create (completed)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     });
 
     it("processing video returns { id, status, created_at } without url", async () => {
@@ -151,9 +152,10 @@ describe("Video API drift", () => {
       // Processing response must NOT include url
       expect(body.url).toBeUndefined();
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     });
   });
 
@@ -173,9 +175,10 @@ describe("Video API drift", () => {
       const diffs = compareShapes(expected, mockShape);
       const report = formatDriftReport("Video status (completed)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     });
 
     it("processing video status returns { id, status, created_at } without url", async () => {
@@ -197,9 +200,10 @@ describe("Video API drift", () => {
       // Processing status must NOT include url
       expect(body.url).toBeUndefined();
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     });
 
     it("unknown video id returns 404", async () => {

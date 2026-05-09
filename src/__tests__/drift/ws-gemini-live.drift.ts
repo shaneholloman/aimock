@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { ServerInstance } from "../../server.js";
-import { extractShape, compareSSESequences, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, compareSSESequences, formatDriftReport } from "./schema.js";
 import {
   geminiLiveSetupCompleteShape,
   geminiLiveTextEventShapes,
@@ -143,9 +143,10 @@ describe.skipIf(!GOOGLE_API_KEY)("Gemini Live WS drift", () => {
     const diffs = compareSSESequences(sdkEvents, realResult.events, mockEvents);
     const report = formatDriftReport("Gemini Live WS (text events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it.skip("WS tool call event sequence matches", async () => {
@@ -219,8 +220,9 @@ describe.skipIf(!GOOGLE_API_KEY)("Gemini Live WS drift", () => {
     const diffs = compareSSESequences(sdkEvents, realResult.events, mockEvents);
     const report = formatDriftReport("Gemini Live WS (tool call events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });
