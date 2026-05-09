@@ -7,13 +7,7 @@
 import http from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { ServerInstance } from "../../server.js";
-import {
-  extractShape,
-  triangulate,
-  compareSSESequences,
-  formatDriftReport,
-  shouldFail,
-} from "./schema.js";
+import { extractShape, triangulate, compareSSESequences, formatDriftReport } from "./schema.js";
 import {
   anthropicMessageShape,
   anthropicMessageToolCallShape,
@@ -66,9 +60,10 @@ describe.skipIf(!ANTHROPIC_API_KEY)("Anthropic Claude Messages drift", () => {
     const diffs = triangulate(sdkShape, realShape, mockShape);
     const report = formatDriftReport("Anthropic Claude (non-streaming text)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("streaming text event sequence and shapes match", async () => {
@@ -97,9 +92,10 @@ describe.skipIf(!ANTHROPIC_API_KEY)("Anthropic Claude Messages drift", () => {
     const diffs = compareSSESequences(sdkEvents, realStream.events, mockSSEShapes);
     const report = formatDriftReport("Anthropic Claude (streaming text events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("non-streaming tool call shape matches", async () => {
@@ -134,9 +130,10 @@ describe.skipIf(!ANTHROPIC_API_KEY)("Anthropic Claude Messages drift", () => {
     const diffs = triangulate(sdkShape, realShape, mockShape);
     const report = formatDriftReport("Anthropic Claude (non-streaming tool call)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("streaming tool call event sequence matches", async () => {
@@ -184,9 +181,10 @@ describe.skipIf(!ANTHROPIC_API_KEY)("Anthropic Claude Messages drift", () => {
     const diffs = compareSSESequences(sdkEvents, realStream.events, mockSSEShapes);
     const report = formatDriftReport("Anthropic Claude (streaming tool call events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });
 
@@ -222,9 +220,10 @@ describe("Anthropic Claude extended thinking shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Anthropic Claude (non-streaming thinking)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("streaming thinking event sequence and shapes match", async () => {
@@ -279,9 +278,10 @@ describe("Anthropic Claude extended thinking shapes", () => {
     const diffs = compareSSESequences(sdkEvents, sdkEvents, mockSSEShapes);
     const report = formatDriftReport("Anthropic Claude (streaming thinking events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("thinking block index precedes text block index", async () => {

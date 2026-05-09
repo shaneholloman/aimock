@@ -471,12 +471,3 @@ export function formatDriftReport(context: string, diffs: ShapeDiff[]): string {
 
   return lines.join("\n");
 }
-
-// ---------------------------------------------------------------------------
-// Strict mode check
-// ---------------------------------------------------------------------------
-
-export function shouldFail(diffs: ShapeDiff[]): boolean {
-  const strict = process.env.STRICT_DRIFT === "1";
-  return diffs.some((d) => d.severity === "critical" || (strict && d.severity === "warning"));
-}

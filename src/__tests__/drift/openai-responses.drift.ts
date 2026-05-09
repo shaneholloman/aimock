@@ -7,13 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type ServerInstance } from "../../server.js";
 import type { Fixture } from "../../types.js";
-import {
-  extractShape,
-  triangulate,
-  compareSSESequences,
-  formatDriftReport,
-  shouldFail,
-} from "./schema.js";
+import { extractShape, triangulate, compareSSESequences, formatDriftReport } from "./schema.js";
 import {
   openaiResponsesNonStreamingShape,
   openaiResponsesTextEventShapes,
@@ -69,9 +63,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Responses API drift", () => {
     const diffs = triangulate(sdkShape, realShape, mockShape);
     const report = formatDriftReport("OpenAI Responses (non-streaming text)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("streaming text event sequence and shapes match", async () => {
@@ -99,9 +94,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Responses API drift", () => {
     const diffs = compareSSESequences(sdkEvents, realStream.events, mockSSEShapes);
     const report = formatDriftReport("OpenAI Responses (streaming text events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("non-streaming tool call shape matches", async () => {
@@ -136,9 +132,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Responses API drift", () => {
     const diffs = triangulate(sdkShape, realShape, mockShape);
     const report = formatDriftReport("OpenAI Responses (non-streaming tool call)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("streaming tool call event sequence matches", async () => {
@@ -185,9 +182,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Responses API drift", () => {
     const diffs = compareSSESequences(sdkEvents, realStream.events, mockSSEShapes);
     const report = formatDriftReport("OpenAI Responses (streaming tool call events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });
 
@@ -247,9 +245,10 @@ describe("OpenAI Responses API error shapes", () => {
       const diffs = triangulate(sdkShape, sdkShape, mockShape);
       const report = formatDriftReport("OpenAI Responses (error fixture shape)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
 
       // Verify concrete values
       expect(body.error.message).toBe("Rate limited");
@@ -276,9 +275,10 @@ describe("OpenAI Responses API error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("OpenAI Responses (no-fixture-match error shape)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
 
     // Verify concrete values
     expect(body.error.message).toBe("No fixture matched");
@@ -298,9 +298,10 @@ describe("OpenAI Responses API error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("OpenAI Responses (malformed request error shape)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
 
     // Verify concrete values
     expect(body.error.message).toBe("Malformed JSON");
@@ -460,9 +461,10 @@ describe("OpenAI Responses API reasoning drift", () => {
       const diffs = triangulate(sdkEvent.dataShape, sdkEvent.dataShape, mockEvent.dataShape);
       const report = formatDriftReport(`OpenAI Responses Reasoning:${sdkEvent.type}`, diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 });

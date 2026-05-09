@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { LLMock } from "../../llmock.js";
-import { extractShape, compareShapes, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, compareShapes, formatDriftReport } from "./schema.js";
 
 // ---------------------------------------------------------------------------
 // Expected shapes (fal.ai queue contract)
@@ -108,9 +108,10 @@ describe("fal.ai queue lifecycle shapes", () => {
     const diffs = compareShapes(expectedShape, mockShape);
     const report = formatDriftReport("fal.ai queue submit envelope", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("status returns COMPLETED with correct shape", async () => {
@@ -146,9 +147,10 @@ describe("fal.ai queue lifecycle shapes", () => {
     const diffs = compareShapes(expectedShape, mockShape);
     const report = formatDriftReport("fal.ai queue status", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("result returns the fixture JSON payload", async () => {
@@ -182,9 +184,10 @@ describe("fal.ai queue lifecycle shapes", () => {
     const diffs = compareShapes(expectedShape, mockShape);
     const report = formatDriftReport("fal.ai queue result", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("cancel returns ALREADY_COMPLETED with 400", async () => {
@@ -218,8 +221,9 @@ describe("fal.ai queue lifecycle shapes", () => {
     const diffs = compareShapes(expectedShape, mockShape);
     const report = formatDriftReport("fal.ai queue cancel", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });

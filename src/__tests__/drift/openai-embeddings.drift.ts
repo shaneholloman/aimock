@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { ServerInstance } from "../../server.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 import { openaiEmbeddingResponseShape } from "./sdk-shapes.js";
 import { openaiEmbeddings } from "./providers.js";
 import { httpPost, startDriftServer, stopDriftServer } from "./helpers.js";
@@ -50,9 +50,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Embeddings drift", () => {
     const diffs = triangulate(sdkShape, realShape, mockShape);
     const report = formatDriftReport("OpenAI Embeddings", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("multiple-input embedding response shape matches", async () => {
@@ -72,8 +73,9 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Embeddings drift", () => {
     const diffs = triangulate(sdkShape, realShape, mockShape);
     const report = formatDriftReport("OpenAI Embeddings (multiple inputs)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });

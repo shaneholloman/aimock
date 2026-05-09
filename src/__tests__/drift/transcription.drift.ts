@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type ServerInstance } from "../../server.js";
 import type { Fixture } from "../../types.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 import { openaiTranscriptionBasicShape, openaiTranscriptionVerboseShape } from "./sdk-shapes.js";
 
 // ---------------------------------------------------------------------------
@@ -119,9 +119,10 @@ describe("Transcription API shape validation", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Transcription basic JSON", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("verbose response shape: { task, language, duration, text, words, segments }", async () => {
@@ -146,9 +147,10 @@ describe("Transcription API shape validation", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Transcription verbose JSON", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("verbose response field types match Whisper spec", async () => {
@@ -302,9 +304,10 @@ describe.skipIf(!OPENAI_API_KEY)("Transcription drift (three-way)", () => {
       const diffs = triangulate(sdkShape, realShape, mockShape);
       const report = formatDriftReport("Transcription basic (three-way)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 
@@ -326,9 +329,10 @@ describe.skipIf(!OPENAI_API_KEY)("Transcription drift (three-way)", () => {
       const diffs = triangulate(sdkShape, realShape, mockShape);
       const report = formatDriftReport("Transcription verbose (three-way)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 });

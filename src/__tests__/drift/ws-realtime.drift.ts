@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { ServerInstance } from "../../server.js";
-import { extractShape, compareSSESequences, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, compareSSESequences, formatDriftReport } from "./schema.js";
 import { openaiRealtimeTextEventShapes, openaiRealtimeToolCallEventShapes } from "./sdk-shapes.js";
 import { openaiRealtimeWS } from "./ws-providers.js";
 import { listOpenAIModels } from "./providers.js";
@@ -116,9 +116,10 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Realtime API drift", () => {
     const diffs = compareSSESequences(sdkEvents, realResult.events, mockEvents);
     const report = formatDriftReport("OpenAI Realtime WS (text events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("WS tool call event sequence matches", async () => {
@@ -209,8 +210,9 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Realtime API drift", () => {
     const diffs = compareSSESequences(sdkEvents, realResult.events, mockEvents);
     const report = formatDriftReport("OpenAI Realtime WS (tool call events)", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });

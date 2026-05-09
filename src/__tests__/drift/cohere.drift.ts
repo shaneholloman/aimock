@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { ServerInstance } from "../../server.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 import {
   httpPost,
   httpPostRaw,
@@ -158,9 +158,10 @@ describe("Cohere error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Cohere /v2/chat malformed JSON error", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("missing model field returns 400 with error envelope", async () => {
@@ -177,9 +178,10 @@ describe("Cohere error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Cohere /v2/chat missing model error", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("missing messages array returns 400 with error envelope", async () => {
@@ -196,9 +198,10 @@ describe("Cohere error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Cohere /v2/chat missing messages error", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 
   it("no fixture match returns 404 with error envelope", async () => {
@@ -216,9 +219,10 @@ describe("Cohere error shapes", () => {
     const diffs = triangulate(sdkShape, sdkShape, mockShape);
     const report = formatDriftReport("Cohere /v2/chat no fixture match error", diffs);
 
-    if (shouldFail(diffs)) {
-      expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-    }
+    expect(
+      diffs.filter((d) => d.severity === "critical"),
+      report,
+    ).toEqual([]);
   });
 });
 
@@ -246,9 +250,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Cohere drift", () => {
       const diffs = triangulate(sdkShape, realShape, mockShape);
       const report = formatDriftReport("Cohere /v2/chat (non-streaming)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 
@@ -281,9 +286,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Cohere drift", () => {
         const diffs = triangulate(sdkChunkShape, realChunkShape, mockChunkShape);
         const report = formatDriftReport("Cohere /v2/chat (streaming first chunk)", diffs);
 
-        if (shouldFail(diffs)) {
-          expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-        }
+        expect(
+          diffs.filter((d) => d.severity === "critical"),
+          report,
+        ).toEqual([]);
 
         // Also compare the LAST chunk shape (has finish_reason, usage)
         const sdkLastChunkShape = extractShape({
@@ -304,9 +310,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Cohere drift", () => {
         const lastDiffs = triangulate(sdkLastChunkShape, realLastShape, mockLastShape);
         const lastReport = formatDriftReport("Cohere /v2/chat (streaming last chunk)", lastDiffs);
 
-        if (shouldFail(lastDiffs)) {
-          expect.soft([], lastReport).toEqual(lastDiffs.filter((d) => d.severity === "critical"));
-        }
+        expect(
+          lastDiffs.filter((d) => d.severity === "critical"),
+          lastReport,
+        ).toEqual([]);
       }
     }
   });

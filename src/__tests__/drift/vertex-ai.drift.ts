@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { ServerInstance } from "../../server.js";
-import { extractShape, triangulate, formatDriftReport, shouldFail } from "./schema.js";
+import { extractShape, triangulate, formatDriftReport } from "./schema.js";
 import { httpPost, startDriftServer, stopDriftServer } from "./helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -93,9 +93,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Vertex AI drift", () => {
       const diffs = triangulate(sdkShape, sdkShape, mockShape);
       const report = formatDriftReport("Vertex AI generateContent", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 
@@ -157,9 +158,10 @@ describe.skipIf(!HAS_CREDENTIALS)("Vertex AI drift", () => {
       const diffs = triangulate(sdkChunkShape, sdkChunkShape, lastShape);
       const report = formatDriftReport("Vertex AI streamGenerateContent (last chunk)", diffs);
 
-      if (shouldFail(diffs)) {
-        expect.soft([], report).toEqual(diffs.filter((d) => d.severity === "critical"));
-      }
+      expect(
+        diffs.filter((d) => d.severity === "critical"),
+        report,
+      ).toEqual([]);
     }
   });
 });
