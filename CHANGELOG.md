@@ -1,6 +1,6 @@
 # @copilotkit/aimock
 
-## [Unreleased]
+## [1.21.0] - 2026-05-11
 
 ### Added
 
