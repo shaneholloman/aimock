@@ -4,15 +4,19 @@ import type { AudioResponse, ChatCompletionRequest, Fixture, HandlerDefaults } f
 import {
   isAudioResponse,
   isErrorResponse,
+  serializeErrorResponse,
+  flattenHeaders,
   FORMAT_TO_CONTENT_TYPE,
   getTestId,
   resolveResponse,
   resolveStrictMode,
   strictOverrideField,
 } from "./helpers.js";
+import { writeErrorResponse } from "./sse-writer.js";
 import { matchFixture } from "./router.js";
 import { proxyAndRecord } from "./recorder.js";
 import type { Journal } from "./journal.js";
+import { applyChaos } from "./chaos.js";
 
 // ─── FalJobMap with TTL and size bound ───────────────────────────────────
 
@@ -24,7 +28,6 @@ interface FalJob {
   modelId: string;
   status: "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED";
   result: Record<string, unknown> | null;
-  createdAt: number;
 }
 
 interface FalJobEntry {
@@ -37,9 +40,40 @@ interface FalJobEntry {
  * Entries older than FAL_JOB_TTL_MS are lazily evicted on `get`.
  * When the map exceeds FAL_JOB_MAX_ENTRIES on `set`, the oldest entries
  * are removed to stay within bounds.
+ * A background sweep runs every 60 s to proactively evict expired entries.
  */
 export class FalJobMap {
   private readonly entries = new Map<string, FalJobEntry>();
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    this.startSweep();
+  }
+
+  /** Start the proactive TTL sweep (every 60 s). */
+  startSweep(): void {
+    if (this.sweepTimer) return;
+    this.sweepTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this.entries) {
+        if (now - entry.createdAt > FAL_JOB_TTL_MS) {
+          this.entries.delete(key);
+        }
+      }
+    }, 60_000);
+    // Allow the process to exit even if the timer is still active
+    if (this.sweepTimer && typeof this.sweepTimer === "object" && "unref" in this.sweepTimer) {
+      this.sweepTimer.unref();
+    }
+  }
+
+  /** Stop the proactive TTL sweep. */
+  stopSweep(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
 
   get(key: string): FalJob | undefined {
     const entry = this.entries.get(key);
@@ -69,6 +103,11 @@ export class FalJobMap {
   }
 
   clear(): void {
+    this.entries.clear();
+  }
+
+  destroy(): void {
+    this.stopSweep();
     this.entries.clear();
   }
 
@@ -196,7 +235,7 @@ export async function handleFalQueue(
   journal.add({
     method: req.method ?? "GET",
     path: pathname,
-    headers: {},
+    headers: flattenHeaders(req.headers),
     body: null,
     response: { status: 404, fixture: null },
   });
@@ -227,7 +266,7 @@ async function handleQueueSubmit(
       journal.add({
         method: req.method ?? "POST",
         path: pathname,
-        headers: {},
+        headers: flattenHeaders(req.headers),
         body: null,
         response: { status: 400, fixture: null },
       });
@@ -254,6 +293,30 @@ async function handleQueueSubmit(
 
   const fixture = matchFixture(fixtures, syntheticReq, matchCounts, defaults.requestTransform);
 
+  if (fixture) {
+    journal.incrementFixtureMatchCount(fixture, fixtures, testId);
+  }
+
+  if (
+    applyChaos(
+      res,
+      fixture,
+      defaults.chaos,
+      req.headers,
+      journal,
+      {
+        method: req.method ?? "POST",
+        path: pathname,
+        headers: flattenHeaders(req.headers),
+        body: syntheticReq,
+      },
+      fixture ? "fixture" : "proxy",
+      defaults.registry,
+      defaults.logger,
+    )
+  )
+    return;
+
   if (!fixture) {
     if (defaults.record) {
       const outcome = await proxyAndRecord(
@@ -267,11 +330,11 @@ async function handleQueueSubmit(
         body,
       );
       if (outcome === "handled_by_hook") return;
-      if (outcome === "relayed") {
+      if (outcome !== "not_configured") {
         journal.add({
           method: req.method ?? "POST",
           path: pathname,
-          headers: {},
+          headers: flattenHeaders(req.headers),
           body: syntheticReq,
           response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
@@ -287,7 +350,7 @@ async function handleQueueSubmit(
     journal.add({
       method: req.method ?? "POST",
       path: pathname,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: {
         status: strictStatus,
@@ -308,7 +371,6 @@ async function handleQueueSubmit(
     return;
   }
 
-  journal.incrementFixtureMatchCount(fixture, fixtures, testId);
   const response = await resolveResponse(fixture, syntheticReq);
 
   if (isErrorResponse(response)) {
@@ -316,12 +378,12 @@ async function handleQueueSubmit(
     journal.add({
       method: req.method ?? "POST",
       path: pathname,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: { status, fixture },
     });
     res.writeHead(status, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(response));
+    res.end(serializeErrorResponse(response));
     return;
   }
 
@@ -329,7 +391,7 @@ async function handleQueueSubmit(
     journal.add({
       method: req.method ?? "POST",
       path: pathname,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: { status: 500, fixture },
     });
@@ -350,7 +412,6 @@ async function handleQueueSubmit(
     modelId,
     status: "COMPLETED",
     result,
-    createdAt: Date.now(),
   };
 
   const stateKey = `${testId}:${requestId}`;
@@ -359,7 +420,7 @@ async function handleQueueSubmit(
   journal.add({
     method: req.method ?? "POST",
     path: pathname,
-    headers: {},
+    headers: flattenHeaders(req.headers),
     body: syntheticReq,
     response: { status: 200, fixture },
   });
@@ -390,7 +451,7 @@ function handleQueueStatus(
     journal.add({
       method: req.method ?? "GET",
       path: pathname,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: null,
       response: { status: 404, fixture: null },
     });
@@ -406,7 +467,7 @@ function handleQueueStatus(
   journal.add({
     method: req.method ?? "GET",
     path: pathname,
-    headers: {},
+    headers: flattenHeaders(req.headers),
     body: null,
     response: { status: 200, fixture: null },
   });
@@ -435,7 +496,7 @@ function handleQueueResult(
     journal.add({
       method: req.method ?? "GET",
       path: pathname,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: null,
       response: { status: 404, fixture: null },
     });
@@ -448,10 +509,28 @@ function handleQueueResult(
     return;
   }
 
+  if (job.result === null) {
+    journal.add({
+      method: req.method ?? "GET",
+      path: pathname,
+      headers: flattenHeaders(req.headers),
+      body: null,
+      response: { status: 409, fixture: null },
+    });
+    writeErrorResponse(
+      res,
+      409,
+      JSON.stringify({
+        error: { message: "Job result not yet available", type: "not_ready" },
+      }),
+    );
+    return;
+  }
+
   journal.add({
     method: req.method ?? "GET",
     path: pathname,
-    headers: {},
+    headers: flattenHeaders(req.headers),
     body: null,
     response: { status: 200, fixture: null },
   });
@@ -474,7 +553,7 @@ function handleQueueCancel(
     journal.add({
       method: req.method ?? "DELETE",
       path: pathname,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: null,
       response: { status: 404, fixture: null },
     });
@@ -487,7 +566,7 @@ function handleQueueCancel(
   journal.add({
     method: req.method ?? "DELETE",
     path: pathname,
-    headers: {},
+    headers: flattenHeaders(req.headers),
     body: null,
     response: { status: 400, fixture: null },
   });
@@ -515,7 +594,7 @@ async function handleSyncRun(
       journal.add({
         method: req.method ?? "POST",
         path: pathname,
-        headers: {},
+        headers: flattenHeaders(req.headers),
         body: null,
         response: { status: 400, fixture: null },
       });
@@ -542,6 +621,30 @@ async function handleSyncRun(
 
   const fixture = matchFixture(fixtures, syntheticReq, matchCounts, defaults.requestTransform);
 
+  if (fixture) {
+    journal.incrementFixtureMatchCount(fixture, fixtures, getTestId(req));
+  }
+
+  if (
+    applyChaos(
+      res,
+      fixture,
+      defaults.chaos,
+      req.headers,
+      journal,
+      {
+        method: req.method ?? "POST",
+        path: pathname,
+        headers: flattenHeaders(req.headers),
+        body: syntheticReq,
+      },
+      fixture ? "fixture" : "proxy",
+      defaults.registry,
+      defaults.logger,
+    )
+  )
+    return;
+
   if (!fixture) {
     if (defaults.record) {
       const outcome = await proxyAndRecord(
@@ -555,11 +658,11 @@ async function handleSyncRun(
         body,
       );
       if (outcome === "handled_by_hook") return;
-      if (outcome === "relayed") {
+      if (outcome !== "not_configured") {
         journal.add({
           method: req.method ?? "POST",
           path: pathname,
-          headers: {},
+          headers: flattenHeaders(req.headers),
           body: syntheticReq,
           response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
@@ -575,7 +678,7 @@ async function handleSyncRun(
     journal.add({
       method: req.method ?? "POST",
       path: pathname,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: {
         status: strictStatus,
@@ -596,7 +699,6 @@ async function handleSyncRun(
     return;
   }
 
-  journal.incrementFixtureMatchCount(fixture, fixtures, getTestId(req));
   const response = await resolveResponse(fixture, syntheticReq);
 
   if (isErrorResponse(response)) {
@@ -604,12 +706,12 @@ async function handleSyncRun(
     journal.add({
       method: req.method ?? "POST",
       path: pathname,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: { status, fixture },
     });
     res.writeHead(status, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(response));
+    res.end(serializeErrorResponse(response));
     return;
   }
 
@@ -617,7 +719,7 @@ async function handleSyncRun(
     journal.add({
       method: req.method ?? "POST",
       path: pathname,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: { status: 500, fixture },
     });
@@ -635,7 +737,7 @@ async function handleSyncRun(
   journal.add({
     method: req.method ?? "POST",
     path: pathname,
-    headers: {},
+    headers: flattenHeaders(req.headers),
     body: syntheticReq,
     response: { status: 200, fixture },
   });

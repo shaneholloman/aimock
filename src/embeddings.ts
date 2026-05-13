@@ -16,6 +16,7 @@ import type {
 import {
   isEmbeddingResponse,
   isErrorResponse,
+  serializeErrorResponse,
   generateDeterministicEmbedding,
   buildEmbeddingResponse,
   flattenHeaders,
@@ -168,7 +169,7 @@ export async function handleEmbeddings(
         body: syntheticReq,
         response: { status, fixture },
       });
-      writeErrorResponse(res, status, JSON.stringify(response));
+      writeErrorResponse(res, status, serializeErrorResponse(response));
       return;
     }
 
@@ -222,6 +223,7 @@ export async function handleEmbeddings(
       defaults,
       raw,
     );
+    if (outcome === "handled_by_hook") return;
     if (outcome !== "not_configured") {
       journal.add({
         method: req.method ?? "POST",

@@ -4,6 +4,8 @@ import {
   isAudioResponse,
   isTextResponse,
   isErrorResponse,
+  serializeErrorResponse,
+  flattenHeaders,
   FORMAT_TO_CONTENT_TYPE,
   getTestId,
   resolveResponse,
@@ -14,6 +16,7 @@ import { matchFixture } from "./router.js";
 import { writeErrorResponse } from "./sse-writer.js";
 import { proxyAndRecord } from "./recorder.js";
 import type { Journal } from "./journal.js";
+import { applyChaos } from "./chaos.js";
 
 export async function handleElevenLabsAudio(
   req: http.IncomingMessage,
@@ -36,7 +39,7 @@ export async function handleElevenLabsAudio(
     journal.add({
       method,
       path,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: null,
       response: { status: 400, fixture: null },
     });
@@ -87,7 +90,7 @@ export async function handleElevenLabsAudio(
     journal.add({
       method,
       path,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: { status: 400, fixture: null },
     });
@@ -113,6 +116,21 @@ export async function handleElevenLabsAudio(
     journal.incrementFixtureMatchCount(fixture, fixtures, testId);
   }
 
+  if (
+    applyChaos(
+      res,
+      fixture,
+      defaults.chaos,
+      req.headers,
+      journal,
+      { method, path, headers: flattenHeaders(req.headers), body: syntheticReq },
+      fixture ? "fixture" : "proxy",
+      defaults.registry,
+      defaults.logger,
+    )
+  )
+    return;
+
   // No fixture match
   if (!fixture) {
     if (defaults.record) {
@@ -127,11 +145,11 @@ export async function handleElevenLabsAudio(
         body,
       );
       if (outcome === "handled_by_hook") return;
-      if (outcome === "relayed") {
+      if (outcome !== "not_configured") {
         journal.add({
           method,
           path,
-          headers: {},
+          headers: flattenHeaders(req.headers),
           body: syntheticReq,
           response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
         });
@@ -147,7 +165,7 @@ export async function handleElevenLabsAudio(
     journal.add({
       method,
       path,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: {
         status: strictStatus,
@@ -173,11 +191,11 @@ export async function handleElevenLabsAudio(
     journal.add({
       method,
       path,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: { status, fixture },
     });
-    writeErrorResponse(res, status, JSON.stringify(response));
+    writeErrorResponse(res, status, serializeErrorResponse(response));
     return;
   }
 
@@ -187,7 +205,7 @@ export async function handleElevenLabsAudio(
       journal.add({
         method,
         path,
-        headers: {},
+        headers: flattenHeaders(req.headers),
         body: syntheticReq,
         response: { status: 500, fixture },
       });
@@ -206,7 +224,7 @@ export async function handleElevenLabsAudio(
     journal.add({
       method,
       path,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: { status: 200, fixture },
     });
@@ -220,7 +238,7 @@ export async function handleElevenLabsAudio(
     journal.add({
       method,
       path,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: { status: 500, fixture },
     });
@@ -257,7 +275,7 @@ export async function handleElevenLabsAudio(
     journal.add({
       method,
       path,
-      headers: {},
+      headers: flattenHeaders(req.headers),
       body: syntheticReq,
       response: { status: 200, fixture },
     });
@@ -273,7 +291,7 @@ export async function handleElevenLabsAudio(
   journal.add({
     method,
     path,
-    headers: {},
+    headers: flattenHeaders(req.headers),
     body: syntheticReq,
     response: { status: 200, fixture },
   });

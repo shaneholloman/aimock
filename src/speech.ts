@@ -3,6 +3,7 @@ import type { ChatCompletionRequest, Fixture, HandlerDefaults } from "./types.js
 import {
   isAudioResponse,
   isErrorResponse,
+  serializeErrorResponse,
   flattenHeaders,
   getTestId,
   FORMAT_TO_CONTENT_TYPE,
@@ -130,6 +131,7 @@ export async function handleSpeech(
         defaults,
         raw,
       );
+      if (outcome === "handled_by_hook") return;
       if (outcome !== "not_configured") {
         journal.add({
           method,
@@ -179,7 +181,7 @@ export async function handleSpeech(
       body: syntheticReq,
       response: { status, fixture },
     });
-    writeErrorResponse(res, status, JSON.stringify(response));
+    writeErrorResponse(res, status, serializeErrorResponse(response));
     return;
   }
 

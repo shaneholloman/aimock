@@ -3,6 +3,7 @@ import type { ChatCompletionRequest, Fixture, HandlerDefaults, VideoResponse } f
 import {
   isVideoResponse,
   isErrorResponse,
+  serializeErrorResponse,
   flattenHeaders,
   getTestId,
   resolveResponse,
@@ -39,15 +40,37 @@ interface VideoStateEntry {
  */
 export class VideoStateMap {
   private readonly entries = new Map<string, VideoStateEntry>();
+  private readonly sweepTimer: ReturnType<typeof setInterval>;
 
-  get(key: string): VideoResponse["video"] | undefined {
+  constructor() {
+    // Proactive sweep every 60 seconds to evict expired entries
+    this.sweepTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this.entries) {
+        if (now - entry.createdAt > VIDEO_STATE_TTL_MS) {
+          this.entries.delete(key);
+        }
+      }
+    }, 60_000);
+    // Allow the process to exit even if the timer is still running
+    if (this.sweepTimer.unref) {
+      this.sweepTimer.unref();
+    }
+  }
+
+  getEntry(key: string): { video: VideoResponse["video"]; createdAtUnix: number } | undefined {
     const entry = this.entries.get(key);
     if (!entry) return undefined;
     if (Date.now() - entry.createdAt > VIDEO_STATE_TTL_MS) {
       this.entries.delete(key);
       return undefined;
     }
-    return entry.video;
+    return { video: entry.video, createdAtUnix: Math.floor(entry.createdAt / 1000) };
+  }
+
+  getCreatedAtUnix(key: string): number | undefined {
+    const e = this.getEntry(key);
+    return e?.createdAtUnix;
   }
 
   set(key: string, video: VideoResponse["video"]): void {
@@ -68,6 +91,11 @@ export class VideoStateMap {
   }
 
   clear(): void {
+    this.entries.clear();
+  }
+
+  destroy(): void {
+    clearInterval(this.sweepTimer);
     this.entries.clear();
   }
 
@@ -182,6 +210,7 @@ export async function handleVideoCreate(
         defaults,
         raw,
       );
+      if (outcome === "handled_by_hook") return;
       if (outcome !== "not_configured") {
         journal.add({
           method,
@@ -231,7 +260,7 @@ export async function handleVideoCreate(
       body: syntheticReq,
       response: { status, fixture },
     });
-    writeErrorResponse(res, status, JSON.stringify(response));
+    writeErrorResponse(res, status, serializeErrorResponse(response));
     return;
   }
 
@@ -262,11 +291,11 @@ export async function handleVideoCreate(
   });
 
   const video = response.video;
-  const created_at = Math.floor(Date.now() / 1000);
 
   // Store for GET status checks
   const stateKey = `${testId}:${video.id}`;
   videoStates.set(stateKey, video);
+  const created_at = videoStates.getCreatedAtUnix(stateKey)!;
 
   if (video.status === "completed") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -307,9 +336,9 @@ export function handleVideoStatus(
 
   const testId = getTestId(req);
   const stateKey = `${testId}:${videoId}`;
-  const video = videoStates.get(stateKey);
+  const entry = videoStates.getEntry(stateKey);
 
-  if (!video) {
+  if (!entry) {
     journal.add({
       method,
       path,
@@ -325,6 +354,8 @@ export function handleVideoStatus(
     return;
   }
 
+  const { video, createdAtUnix: created_at } = entry;
+
   journal.add({
     method,
     path,
@@ -333,7 +364,6 @@ export function handleVideoStatus(
     response: { status: 200, fixture: null },
   });
 
-  const created_at = Math.floor(Date.now() / 1000);
   const body: Record<string, unknown> = {
     id: video.id,
     status: video.status,
