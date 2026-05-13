@@ -3,6 +3,7 @@ import type { ChatCompletionRequest, Fixture, HandlerDefaults } from "./types.js
 import {
   isImageResponse,
   isErrorResponse,
+  serializeErrorResponse,
   flattenHeaders,
   getTestId,
   resolveResponse,
@@ -151,6 +152,7 @@ export async function handleImages(
         defaults,
         raw,
       );
+      if (outcome === "handled_by_hook") return;
       if (outcome !== "not_configured") {
         journal.add({
           method,
@@ -200,7 +202,7 @@ export async function handleImages(
       body: syntheticReq,
       response: { status, fixture },
     });
-    writeErrorResponse(res, status, JSON.stringify(response));
+    writeErrorResponse(res, status, serializeErrorResponse(response));
     return;
   }
 

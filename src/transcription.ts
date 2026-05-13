@@ -3,6 +3,7 @@ import type { ChatCompletionRequest, Fixture, HandlerDefaults } from "./types.js
 import {
   isTranscriptionResponse,
   isErrorResponse,
+  serializeErrorResponse,
   flattenHeaders,
   getTestId,
   resolveResponse,
@@ -16,20 +17,59 @@ import { applyChaos } from "./chaos.js";
 import { proxyAndRecord } from "./recorder.js";
 
 /**
- * Extract a text field from multipart form data using regex.
- * NOTE: This runs against the full body including binary audio data.
- * It works because text metadata fields (model, response_format, etc.)
- * appear before the binary audio part in standard multipart encoding.
- * A proper multipart parser would be more robust but is overkill for
- * the small set of fields we extract.
+ * Extract the multipart boundary string from a Content-Type header.
  */
-function extractFormField(raw: string, fieldName: string): string | undefined {
-  const pattern = new RegExp(
-    `Content-Disposition:\\s*form-data;[^\\r\\n]*name="${fieldName}"[^\\r\\n]*\\r\\n\\r\\n([^\\r\\n]*)`,
-    "i",
-  );
-  const match = raw.match(pattern);
+function extractBoundary(contentType: string | undefined): string | undefined {
+  if (!contentType) return undefined;
+  const match = contentType.match(/boundary=([^\s;]+)/i);
   return match?.[1];
+}
+
+/**
+ * Extract a text field from multipart form data using boundary-based parsing.
+ * Splits the body by the multipart boundary so each part is isolated, then
+ * checks each part's Content-Disposition header for the target field name.
+ * This avoids false matches from binary audio data that might contain
+ * header-like byte sequences.
+ */
+function extractFormField(
+  raw: string,
+  fieldName: string,
+  boundary: string | undefined,
+): string | undefined {
+  if (!boundary) {
+    // Fallback: no boundary available, use simple regex (best-effort)
+    const pattern = new RegExp(
+      `Content-Disposition:\\s*form-data;[^\\r\\n]*name="${fieldName}"[^\\r\\n]*\\r\\n\\r\\n([^\\r\\n]*)`,
+      "i",
+    );
+    const match = raw.match(pattern);
+    return match?.[1];
+  }
+
+  // Split by boundary delimiter — each chunk is one part
+  const delimiter = `--${boundary}`;
+  const parts = raw.split(delimiter);
+
+  for (const part of parts) {
+    // Skip the preamble (before first boundary) and epilogue (after closing boundary)
+    if (!part || part.trimStart().startsWith("--")) continue;
+
+    // Split part into headers and body at the first blank line (\r\n\r\n)
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd === -1) continue;
+
+    const headers = part.slice(0, headerEnd);
+    const body = part.slice(headerEnd + 4);
+
+    // Check if this part's Content-Disposition names the target field
+    const cdMatch = headers.match(/Content-Disposition:\s*form-data;[^\r\n]*name="([^"]+)"/i);
+    if (cdMatch && cdMatch[1] === fieldName) {
+      // Return the body value, trimming trailing \r\n from the part boundary
+      return body.replace(/\r\n$/, "");
+    }
+  }
+  return undefined;
 }
 
 export async function handleTranscription(
@@ -45,8 +85,13 @@ export async function handleTranscription(
   const path = req.url ?? "/v1/audio/transcriptions";
   const method = req.method ?? "POST";
 
-  const model = extractFormField(raw, "model") ?? "whisper-1";
-  const responseFormat = extractFormField(raw, "response_format") ?? "json";
+  const contentType = Array.isArray(req.headers["content-type"])
+    ? req.headers["content-type"][0]
+    : req.headers["content-type"];
+  const boundary = extractBoundary(contentType);
+
+  const model = extractFormField(raw, "model", boundary) ?? "whisper-1";
+  const responseFormat = extractFormField(raw, "response_format", boundary) ?? "json";
 
   const syntheticReq: ChatCompletionRequest = {
     model,
@@ -96,6 +141,7 @@ export async function handleTranscription(
         defaults,
         raw,
       );
+      if (outcome === "handled_by_hook") return;
       if (outcome !== "not_configured") {
         journal.add({
           method,
@@ -149,7 +195,7 @@ export async function handleTranscription(
       body: syntheticReq,
       response: { status, fixture },
     });
-    writeErrorResponse(res, status, JSON.stringify(response));
+    writeErrorResponse(res, status, serializeErrorResponse(response));
     return;
   }
 

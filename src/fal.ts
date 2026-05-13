@@ -4,6 +4,7 @@ import type { ChatCompletionRequest, Fixture, HandlerDefaults, RawJSONResponse }
 import {
   isAudioResponse,
   isErrorResponse,
+  serializeErrorResponse,
   isJSONResponse,
   flattenHeaders,
   getTestId,
@@ -327,7 +328,7 @@ export async function handleFal(
             body,
           );
           if (outcome === "handled_by_hook") return "handled";
-          if (outcome === "relayed") {
+          if (outcome !== "not_configured") {
             journal.add({
               method: req.method ?? "POST",
               path: pathname,
@@ -381,7 +382,7 @@ export async function handleFal(
           response: { status, fixture },
         });
         res.writeHead(status, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(response));
+        res.end(serializeErrorResponse(response));
         return "handled";
       }
 
