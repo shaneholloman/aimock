@@ -1295,14 +1295,14 @@ describe("WebSocket /v1/realtime", () => {
     // Skip session.created
     await ws.waitForMessages(1);
 
-    // Update session to transcription mode with whisper model
-    ws.send(sessionUpdate({ type: "transcription", model: "gpt-realtime-whisper" }));
+    // Update session to transcription mode with transcribe model
+    ws.send(sessionUpdate({ type: "transcription", model: "gpt-4o-transcribe" }));
 
     const updateRaw = await ws.waitForMessages(2);
     const updateEvent = parseEvents(updateRaw.slice(1))[0];
     expect(updateEvent.type).toBe("session.updated");
     expect((updateEvent.session as Record<string, unknown>).type).toBe("transcription");
-    expect((updateEvent.session as Record<string, unknown>).model).toBe("gpt-realtime-whisper");
+    expect((updateEvent.session as Record<string, unknown>).model).toBe("gpt-4o-transcribe");
 
     // Send audio buffer messages
     ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: "base64data" }));
@@ -1389,13 +1389,13 @@ describe("WebSocket /v1/realtime", () => {
 
     await ws.waitForMessages(1); // session.created
 
-    ws.send(sessionUpdate({ type: "translation", model: "gpt-realtime-translate" }));
+    ws.send(sessionUpdate({ type: "translation", model: "gpt-4o-transcribe" }));
 
     const raw = await ws.waitForMessages(2);
     const event = parseEvents(raw.slice(1))[0];
     expect(event.type).toBe("session.updated");
     expect((event.session as Record<string, unknown>).type).toBe("translation");
-    expect((event.session as Record<string, unknown>).model).toBe("gpt-realtime-translate");
+    expect((event.session as Record<string, unknown>).model).toBe("gpt-4o-transcribe");
 
     ws.close();
   });
@@ -1425,7 +1425,7 @@ describe("WebSocket /v1/realtime", () => {
 
     await ws.waitForMessages(1); // session.created
 
-    ws.send(sessionUpdate({ type: "translation", model: "gpt-realtime-2" }));
+    ws.send(sessionUpdate({ type: "translation", model: "gpt-realtime-mini" }));
 
     const raw = await ws.waitForMessages(2);
     const event = parseEvents(raw.slice(1))[0];
@@ -1444,7 +1444,7 @@ describe("WebSocket /v1/realtime", () => {
 
     await ws.waitForMessages(1); // session.created
 
-    ws.send(sessionUpdate({ type: "translation", model: "gpt-realtime-translate" }));
+    ws.send(sessionUpdate({ type: "translation", model: "gpt-4o-transcribe" }));
     await ws.waitForMessages(2); // session.updated
 
     ws.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
@@ -1539,11 +1539,13 @@ describe("WebSocket /v1/realtime", () => {
 
   // ── GA model acceptance tests ───────────────────────────────────────────
   it.each([
+    "gpt-realtime",
     "gpt-realtime-2",
+    "gpt-realtime-2025-08-28",
     "gpt-realtime-1.5",
     "gpt-realtime-mini",
-    "gpt-realtime-translate",
-    "gpt-realtime-whisper",
+    "gpt-realtime-mini-2025-10-06",
+    "gpt-realtime-mini-2025-12-15",
   ])("accepts GA model %s via query parameter", async (model) => {
     instance = await createServer(allFixtures);
     const ws = await connectWebSocket(instance.url, `/v1/realtime?model=${model}`);
@@ -1598,7 +1600,7 @@ describe("WebSocket /v1/realtime", () => {
 
   it("sets _endpointType to realtime-transcription for transcription sessions", async () => {
     instance = await createServer(allFixtures);
-    const ws = await connectWebSocket(instance.url, "/v1/realtime?model=gpt-realtime-whisper");
+    const ws = await connectWebSocket(instance.url, "/v1/realtime?model=gpt-4o-transcribe");
 
     await ws.waitForMessages(1); // session.created
 
@@ -1624,7 +1626,7 @@ describe("WebSocket /v1/realtime", () => {
 
   it("sets _endpointType to realtime-translation for translation sessions", async () => {
     instance = await createServer(allFixtures);
-    const ws = await connectWebSocket(instance.url, "/v1/realtime?model=gpt-realtime-translate");
+    const ws = await connectWebSocket(instance.url, "/v1/realtime?model=gpt-4o-transcribe");
 
     await ws.waitForMessages(1); // session.created
 

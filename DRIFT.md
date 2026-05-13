@@ -131,7 +131,7 @@ Uses `describe.skipIf(!GOOGLE_API_KEY)` like other Gemini tests. The Interaction
 
 **GA Realtime Drift Tests**:
 
-- **Model canary** — Verifies all 5 GA models exist (`gpt-realtime-2`, `gpt-realtime-1.5`, `gpt-realtime-mini`, `gpt-realtime-translate`, `gpt-realtime-whisper`) and flags unknown realtime models
+- **Model canary** — Verifies GA models exist (`gpt-realtime`, `gpt-realtime-2`, `gpt-realtime-1.5`, `gpt-realtime-mini` and dated snapshots) and flags unknown realtime models
 - **Protocol probe** — Connects with both GA and Beta protocol, normalizes event sequences, and verifies consistency
 - **Event shape validation** — GA event names (`response.output_text.delta`, `conversation.item.added`, `conversation.item.done`) and nested session config (`session.audio.*`, `session.type`, `session.reasoning`)
 

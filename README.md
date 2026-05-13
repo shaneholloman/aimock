@@ -57,7 +57,7 @@ Run them all on one port with `npx @copilotkit/aimock --config aimock.json`, or 
 - **Per-Request Strict Mode** — `X-AIMock-Strict` header overrides the server-level `--strict` flag per request (`true`/`1` = strict, `false`/`0` = lenient)
 - **[Drift Detection](https://aimock.copilotkit.dev/drift-detection)** — Daily CI validation against real APIs
 - **[Streaming Physics](https://aimock.copilotkit.dev/streaming-physics)** — Configurable `ttft`, `tps`, and `jitter`
-- **[WebSocket APIs](https://aimock.copilotkit.dev/websocket)** — OpenAI Realtime (GA protocol with 5 models: gpt-realtime-2, gpt-realtime-1.5, gpt-realtime-mini, gpt-realtime-translate, gpt-realtime-whisper; transcription/translation session types; image input; commentary phase), Responses WS, Gemini Live
+- **[WebSocket APIs](https://aimock.copilotkit.dev/websocket)** — OpenAI Realtime (GA protocol with models: gpt-realtime, gpt-realtime-2, gpt-realtime-1.5, gpt-realtime-mini; transcription/translation via gpt-4o-transcribe, gpt-4o-mini-transcribe, whisper-1; image input; commentary phase), Responses WS, Gemini Live
 - **[Prometheus Metrics](https://aimock.copilotkit.dev/metrics)** — Request counts, latencies, fixture match rates
 - **[Docker + Helm](https://aimock.copilotkit.dev/docker)** — Container image and Helm chart for CI/CD
 - **[Vitest & Jest Plugins](https://aimock.copilotkit.dev/test-plugins)** — Zero-config `useAimock()` with auto lifecycle and env patching

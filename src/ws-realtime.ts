@@ -485,8 +485,12 @@ async function processMessage(
         } | null;
 
       // Validate model+type combinations (rollback on failure)
-      const transcriptionModels = new Set(["gpt-realtime-whisper"]);
-      const translationModels = new Set(["gpt-realtime-translate"]);
+      const transcriptionModels = new Set([
+        "gpt-4o-transcribe",
+        "gpt-4o-mini-transcribe",
+        "whisper-1",
+      ]);
+      const translationModels = new Set(["gpt-4o-transcribe", "gpt-4o-mini-transcribe"]);
 
       if (session.type === "transcription" && !transcriptionModels.has(session.model)) {
         session.model = prevModel;

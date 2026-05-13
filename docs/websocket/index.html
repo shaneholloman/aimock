@@ -131,6 +131,11 @@
           </thead>
           <tbody>
             <tr>
+              <td>gpt-realtime</td>
+              <td>conversation</td>
+              <td>Base alias &mdash; resolves to latest GA model</td>
+            </tr>
+            <tr>
               <td>gpt-realtime-2</td>
               <td>conversation</td>
               <td>Default model &mdash; GA successor to gpt-4o-realtime-preview</td>
@@ -146,14 +151,19 @@
               <td>Smaller, faster GA model</td>
             </tr>
             <tr>
-              <td>gpt-realtime-translate</td>
-              <td>translation</td>
-              <td>Real-time speech translation</td>
+              <td>gpt-4o-transcribe</td>
+              <td>transcription, translation</td>
+              <td>Speech transcription and translation</td>
             </tr>
             <tr>
-              <td>gpt-realtime-whisper</td>
+              <td>gpt-4o-mini-transcribe</td>
+              <td>transcription, translation</td>
+              <td>Smaller transcription and translation model</td>
+            </tr>
+            <tr>
+              <td>whisper-1</td>
               <td>transcription</td>
-              <td>Real-time speech transcription</td>
+              <td>Legacy Whisper transcription model</td>
             </tr>
           </tbody>
         </table>
@@ -166,11 +176,12 @@
           </li>
           <li>
             <strong>transcription</strong> &mdash; Audio-to-text transcription (requires
-            <code>gpt-realtime-whisper</code>)
+            <code>gpt-4o-transcribe</code>, <code>gpt-4o-mini-transcribe</code>, or
+            <code>whisper-1</code>)
           </li>
           <li>
             <strong>translation</strong> &mdash; Real-time speech translation (requires
-            <code>gpt-realtime-translate</code>)
+            <code>gpt-4o-transcribe</code> or <code>gpt-4o-mini-transcribe</code>)
           </li>
         </ul>
 

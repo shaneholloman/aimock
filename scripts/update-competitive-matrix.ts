@@ -90,10 +90,11 @@ const FEATURE_RULES: FeatureRule[] = [
     ],
   },
   {
-    rowLabel: "Realtime translate/whisper",
+    rowLabel: "Realtime transcription/translation",
     keywords: [
-      "gpt-realtime-translate",
-      "gpt-realtime-whisper",
+      "gpt-4o-transcribe",
+      "gpt-4o-mini-transcribe",
+      "whisper-1",
       "realtime.*transcription",
       "realtime.*translation",
     ],
