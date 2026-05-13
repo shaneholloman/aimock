@@ -11,8 +11,10 @@ import type { ChatCompletionRequest, ChatMessage, Fixture } from "./types.js";
 import { matchFixture } from "./router.js";
 import {
   generateToolCallId,
+  flattenHeaders,
   isTextResponse,
   isToolCallResponse,
+  isContentWithToolCallsResponse,
   isErrorResponse,
   resolveResponse,
   resolveStrictMode,
@@ -191,8 +193,10 @@ export function handleWebSocketRealtime(
           logger.error(`WebSocket realtime error: ${msg}`);
           try {
             ws.send(buildErrorRealtimeEvent(msg, "server_error"));
-          } catch {
-            // Connection already gone — original error already logged above
+          } catch (sendErr) {
+            defaults.logger.debug(
+              `Failed to send error to client: ${sendErr instanceof Error ? sendErr.message : "unknown"}`,
+            );
           }
         },
       ),
@@ -291,7 +295,15 @@ async function processMessage(
 
   // ── response.create ───────────────────────────────────────────────────
   if (msgType === "response.create") {
-    await handleResponseCreate(ws, fixtures, journal, defaults, session, conversationItems);
+    await handleResponseCreate(
+      ws,
+      fixtures,
+      journal,
+      defaults,
+      session,
+      conversationItems,
+      parsed.response,
+    );
     return;
   }
 
@@ -314,13 +326,15 @@ async function handleResponseCreate(
   },
   session: SessionConfig,
   conversationItems: RealtimeItem[],
+  responseOverrides?: { instructions?: string; [key: string]: unknown },
 ): Promise<void> {
-  const instructions = session.instructions || undefined;
+  const instructions = (responseOverrides?.instructions ?? session.instructions) || undefined;
   const messages = realtimeItemsToMessages(conversationItems, instructions, defaults.logger);
 
   const completionReq: ChatCompletionRequest = {
     model: session.model,
     messages,
+    _endpointType: "chat",
   };
 
   const testId = defaults.testId ?? DEFAULT_TEST_ID;
@@ -339,13 +353,24 @@ async function handleResponseCreate(
   if (!fixture) {
     if (resolveStrictMode(defaults.strict, defaults.upgradeHeaders)) {
       defaults.logger.warn(`STRICT: No fixture matched for WebSocket message`);
+      journal.add({
+        method: "WS",
+        path: "/v1/realtime",
+        headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
+        body: completionReq,
+        response: {
+          status: 503,
+          fixture: null,
+          ...strictOverrideField(defaults.strict, defaults.upgradeHeaders),
+        },
+      });
       ws.close(1008, "Strict mode: no fixture matched");
       return;
     }
     journal.add({
       method: "WS",
       path: "/v1/realtime",
-      headers: {},
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
       body: completionReq,
       response: {
         status: 404,
@@ -398,7 +423,7 @@ async function handleResponseCreate(
     journal.add({
       method: "WS",
       path: "/v1/realtime",
-      headers: {},
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
       body: completionReq,
       response: { status, fixture },
     });
@@ -436,12 +461,295 @@ async function handleResponseCreate(
     return;
   }
 
+  // ── Content + tool calls response ──────────────────────────────────
+  if (isContentWithToolCallsResponse(response)) {
+    const journalEntry = journal.add({
+      method: "WS",
+      path: "/v1/realtime",
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
+      body: completionReq,
+      response: { status: 200, fixture },
+    });
+
+    // response.created
+    ws.send(
+      evt("response.created", {
+        response: {
+          id: responseId,
+          object: "realtime.response",
+          status: "in_progress",
+          status_details: null,
+          output: [],
+          usage: null,
+        },
+      }),
+    );
+
+    const interruption = createInterruptionSignal(fixture);
+    let interrupted = false;
+    const allOutputItems: unknown[] = [];
+
+    // ── Text content part ──────────────────────────────────────────
+    const textItemId = realtimeId("item");
+    const contentIndex = 0;
+    const textOutputIndex = 0;
+
+    const textOutputItem = {
+      id: textItemId,
+      type: "message",
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "text", text: response.content }],
+    };
+
+    // response.output_item.added (text)
+    ws.send(
+      evt("response.output_item.added", {
+        response_id: responseId,
+        output_index: textOutputIndex,
+        item: {
+          id: textItemId,
+          type: "message",
+          role: "assistant",
+          status: "in_progress",
+          content: [],
+        },
+      }),
+    );
+
+    // response.content_part.added
+    ws.send(
+      evt("response.content_part.added", {
+        response_id: responseId,
+        item_id: textItemId,
+        output_index: textOutputIndex,
+        content_index: contentIndex,
+        part: { type: "text", text: "" },
+      }),
+    );
+
+    // response.text.delta (chunked)
+    const content = response.content;
+    for (let i = 0; i < content.length; i += chunkSize) {
+      if (ws.isClosed) break;
+      if (latency > 0) await delay(latency, interruption?.signal);
+      if (interruption?.signal.aborted) {
+        interrupted = true;
+        break;
+      }
+      if (ws.isClosed) break;
+      const chunk = content.slice(i, i + chunkSize);
+      ws.send(
+        evt("response.text.delta", {
+          response_id: responseId,
+          item_id: textItemId,
+          output_index: textOutputIndex,
+          content_index: contentIndex,
+          delta: chunk,
+        }),
+      );
+      interruption?.tick();
+      if (interruption?.signal.aborted) {
+        interrupted = true;
+        break;
+      }
+    }
+
+    if (interrupted) {
+      ws.destroy();
+      journalEntry.response.interrupted = true;
+      journalEntry.response.interruptReason = interruption?.reason();
+      interruption?.cleanup();
+      return;
+    }
+
+    if (ws.isClosed) {
+      interruption?.cleanup();
+      return;
+    }
+
+    // response.text.done
+    ws.send(
+      evt("response.text.done", {
+        response_id: responseId,
+        item_id: textItemId,
+        output_index: textOutputIndex,
+        content_index: contentIndex,
+        text: content,
+      }),
+    );
+
+    if (ws.isClosed) {
+      interruption?.cleanup();
+      return;
+    }
+
+    // response.content_part.done
+    ws.send(
+      evt("response.content_part.done", {
+        response_id: responseId,
+        item_id: textItemId,
+        output_index: textOutputIndex,
+        content_index: contentIndex,
+        part: { type: "text", text: content },
+      }),
+    );
+
+    if (ws.isClosed) {
+      interruption?.cleanup();
+      return;
+    }
+
+    // response.output_item.done (text)
+    ws.send(
+      evt("response.output_item.done", {
+        response_id: responseId,
+        output_index: textOutputIndex,
+        item: textOutputItem,
+      }),
+    );
+
+    if (ws.isClosed) {
+      interruption?.cleanup();
+      return;
+    }
+
+    allOutputItems.push(textOutputItem);
+
+    // ── Tool call parts ────────────────────────────────────────────
+    for (let tcIdx = 0; tcIdx < response.toolCalls.length; tcIdx++) {
+      const tc = response.toolCalls[tcIdx];
+      const callId = tc.id ?? generateToolCallId();
+      const itemId = realtimeId("item");
+      const outputIndex = tcIdx + 1; // offset by 1 for the text item
+
+      const toolOutputItem = {
+        id: itemId,
+        type: "function_call",
+        status: "completed",
+        call_id: callId,
+        name: tc.name,
+        arguments: tc.arguments,
+      };
+
+      // response.output_item.added
+      ws.send(
+        evt("response.output_item.added", {
+          response_id: responseId,
+          output_index: outputIndex,
+          item: {
+            id: itemId,
+            type: "function_call",
+            status: "in_progress",
+            call_id: callId,
+            name: tc.name,
+            arguments: "",
+          },
+        }),
+      );
+
+      // response.function_call_arguments.delta (chunked)
+      const args = tc.arguments;
+      for (let i = 0; i < args.length; i += chunkSize) {
+        if (ws.isClosed) break;
+        if (latency > 0) await delay(latency, interruption?.signal);
+        if (interruption?.signal.aborted) {
+          interrupted = true;
+          break;
+        }
+        if (ws.isClosed) break;
+        const chunk = args.slice(i, i + chunkSize);
+        ws.send(
+          evt("response.function_call_arguments.delta", {
+            response_id: responseId,
+            item_id: itemId,
+            output_index: outputIndex,
+            call_id: callId,
+            delta: chunk,
+          }),
+        );
+        interruption?.tick();
+        if (interruption?.signal.aborted) {
+          interrupted = true;
+          break;
+        }
+      }
+
+      if (interrupted) break;
+
+      if (ws.isClosed) break;
+
+      // response.function_call_arguments.done
+      ws.send(
+        evt("response.function_call_arguments.done", {
+          response_id: responseId,
+          item_id: itemId,
+          output_index: outputIndex,
+          call_id: callId,
+          arguments: args,
+        }),
+      );
+
+      if (ws.isClosed) break;
+
+      // response.output_item.done
+      ws.send(
+        evt("response.output_item.done", {
+          response_id: responseId,
+          output_index: outputIndex,
+          item: toolOutputItem,
+        }),
+      );
+
+      if (ws.isClosed) break;
+
+      allOutputItems.push(toolOutputItem);
+    }
+
+    if (interrupted) {
+      ws.destroy();
+      journalEntry.response.interrupted = true;
+      journalEntry.response.interruptReason = interruption?.reason();
+      interruption?.cleanup();
+      return;
+    }
+
+    interruption?.cleanup();
+
+    if (ws.isClosed) return;
+
+    // response.done
+    ws.send(
+      evt("response.done", {
+        response: {
+          id: responseId,
+          object: "realtime.response",
+          status: "completed",
+          output: allOutputItems,
+          usage: { total_tokens: 0, input_tokens: 0, output_tokens: 0 },
+        },
+      }),
+    );
+
+    // Accumulate into conversation for multi-turn
+    conversationItems.push({
+      type: "message",
+      id: textItemId,
+      role: "assistant",
+      content: [{ type: "text", text: content }],
+    });
+    for (const item of allOutputItems.slice(1)) {
+      conversationItems.push(item as RealtimeItem);
+    }
+    return;
+  }
+
   // ── Text response ───────────────────────────────────────────────────
   if (isTextResponse(response)) {
     const journalEntry = journal.add({
       method: "WS",
       path: "/v1/realtime",
-      headers: {},
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
       body: completionReq,
       response: { status: 200, fixture },
     });
@@ -599,7 +907,7 @@ async function handleResponseCreate(
     const journalEntry = journal.add({
       method: "WS",
       path: "/v1/realtime",
-      headers: {},
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
       body: completionReq,
       response: { status: 200, fixture },
     });
@@ -681,6 +989,8 @@ async function handleResponseCreate(
 
       if (interrupted) break;
 
+      if (ws.isClosed) break;
+
       // response.function_call_arguments.done
       ws.send(
         evt("response.function_call_arguments.done", {
@@ -741,7 +1051,7 @@ async function handleResponseCreate(
   journal.add({
     method: "WS",
     path: "/v1/realtime",
-    headers: {},
+    headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
     body: completionReq,
     response: { status: 500, fixture },
   });

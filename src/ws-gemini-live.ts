@@ -20,6 +20,7 @@ import {
   isContentWithToolCallsResponse,
   isErrorResponse,
   isAudioResponse,
+  flattenHeaders,
   formatToMime,
   generateToolCallId,
   resolveResponse,
@@ -165,15 +166,16 @@ function geminiTurnsToMessages(turns: GeminiLiveTurn[]): ChatMessage[] {
       const textParts = turn.parts.filter((p) => p.text !== undefined && !p.thought);
 
       if (funcCalls.length > 0) {
+        const text = textParts.map((p) => p.text!).join("");
         messages.push({
           role: "assistant",
-          content: null,
+          content: text || null,
           tool_calls: funcCalls.map((p, i) => ({
             id: `call_gemini_${p.functionCall!.name}_${i}`,
             type: "function" as const,
             function: {
               name: p.functionCall!.name,
-              arguments: JSON.stringify(p.functionCall!.args),
+              arguments: JSON.stringify(p.functionCall!.args ?? {}),
             },
           })),
         });
@@ -251,8 +253,10 @@ export function handleWebSocketGeminiLive(
               error: { code: 13, message: msg, status: "INTERNAL" },
             }),
           );
-        } catch {
-          // Connection already gone — original error already logged above
+        } catch (sendErr) {
+          defaults.logger.debug(
+            `Failed to send error to client: ${sendErr instanceof Error ? sendErr.message : "unknown"}`,
+          );
         }
       }),
     );
@@ -362,6 +366,7 @@ async function processMessage(
     messages: [...session.conversationHistory, ...newMessages],
     stream: true,
     tools: session.tools.length > 0 ? session.tools : undefined,
+    _endpointType: "chat",
   };
 
   const testId = defaults.testId ?? DEFAULT_TEST_ID;
@@ -383,10 +388,10 @@ async function processMessage(
       journal.add({
         method: "WS",
         path,
-        headers: {},
+        headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
         body: completionReq,
         response: {
-          status: 404,
+          status: 503,
           fixture: null,
           ...strictOverrideField(defaults.strict, defaults.upgradeHeaders),
         },
@@ -397,9 +402,13 @@ async function processMessage(
     journal.add({
       method: "WS",
       path,
-      headers: {},
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
       body: completionReq,
-      response: { status: 404, fixture: null },
+      response: {
+        status: 404,
+        fixture: null,
+        ...strictOverrideField(defaults.strict, defaults.upgradeHeaders),
+      },
     });
     ws.send(
       JSON.stringify({
@@ -422,7 +431,7 @@ async function processMessage(
     journal.add({
       method: "WS",
       path,
-      headers: {},
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
       body: completionReq,
       response: { status, fixture },
     });
@@ -443,7 +452,7 @@ async function processMessage(
     journal.add({
       method: "WS",
       path,
-      headers: {},
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
       body: completionReq,
       response: { status: 200, fixture },
     });
@@ -483,7 +492,7 @@ async function processMessage(
     const journalEntry = journal.add({
       method: "WS",
       path,
-      headers: {},
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
       body: completionReq,
       response: { status: 200, fixture },
     });
@@ -619,7 +628,7 @@ async function processMessage(
     const journalEntry = journal.add({
       method: "WS",
       path,
-      headers: {},
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
       body: completionReq,
       response: { status: 200, fixture },
     });
@@ -706,7 +715,7 @@ async function processMessage(
     const journalEntry = journal.add({
       method: "WS",
       path,
-      headers: {},
+      headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
       body: completionReq,
       response: { status: 200, fixture },
     });
@@ -789,7 +798,7 @@ async function processMessage(
   journal.add({
     method: "WS",
     path,
-    headers: {},
+    headers: flattenHeaders(defaults.upgradeHeaders ?? {}),
     body: completionReq,
     response: { status: 500, fixture },
   });
