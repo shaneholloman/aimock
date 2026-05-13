@@ -488,9 +488,14 @@ async function processMessage(
       const transcriptionModels = new Set([
         "gpt-4o-transcribe",
         "gpt-4o-mini-transcribe",
+        "gpt-realtime-whisper",
         "whisper-1",
       ]);
-      const translationModels = new Set(["gpt-4o-transcribe", "gpt-4o-mini-transcribe"]);
+      const translationModels = new Set([
+        "gpt-4o-transcribe",
+        "gpt-4o-mini-transcribe",
+        "gpt-realtime-translate",
+      ]);
 
       if (session.type === "transcription" && !transcriptionModels.has(session.model)) {
         session.model = prevModel;

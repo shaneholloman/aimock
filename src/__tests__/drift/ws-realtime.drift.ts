@@ -66,11 +66,18 @@ describe.skipIf(!OPENAI_API_KEY)("OpenAI Realtime API drift", () => {
     ];
     const knownModels = new Set([
       ...gaModels,
+      // Translate/whisper models (also contain "realtime" in some variants)
+      "gpt-realtime-translate",
+      "gpt-realtime-whisper",
       // Audio models also valid in realtime sessions
       "gpt-audio-1.5",
       "gpt-audio-mini",
       "gpt-audio-mini-2025-10-06",
       "gpt-audio-mini-2025-12-15",
+      // Transcription/translation models
+      "gpt-4o-transcribe",
+      "gpt-4o-mini-transcribe",
+      "whisper-1",
       // Legacy preview models (may still appear)
       "gpt-4o-realtime-preview",
       "gpt-4o-mini-realtime-preview",
