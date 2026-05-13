@@ -387,6 +387,7 @@ export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
             });
           }
         }
+        validateWebSearches(response, i, results);
       }
 
       // Error response checks
@@ -612,6 +613,19 @@ export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
         });
       }
     }
+    if (f.match.sequenceIndex !== undefined) {
+      if (
+        typeof f.match.sequenceIndex !== "number" ||
+        f.match.sequenceIndex < 0 ||
+        !Number.isInteger(f.match.sequenceIndex)
+      ) {
+        results.push({
+          severity: "error",
+          fixtureIndex: i,
+          message: "match.sequenceIndex must be a non-negative integer",
+        });
+      }
+    }
     if (f.match.hasToolResult !== undefined && typeof f.match.hasToolResult !== "boolean") {
       results.push({
         severity: "error",
@@ -683,6 +697,7 @@ export function validateFixtures(fixtures: Fixture[]): ValidationResult[] {
       match.model !== undefined ||
       match.predicate !== undefined ||
       match.turnIndex !== undefined ||
+      match.sequenceIndex !== undefined ||
       match.hasToolResult !== undefined;
 
     if (!hasDiscriminator && i < fixtures.length - 1) {
