@@ -521,6 +521,21 @@ export interface RecordConfig {
    * the poll cadence and timeout here if upstream is unusually slow or fast.
    */
   fal?: FalRecordConfig;
+  /**
+   * Connection idle timeout (ms) on the upstream request socket — fires if the
+   * socket is inactive for this duration at any point before the response body
+   * begins. Default: 30_000 (30s). Increase for upstreams with slow initial
+   * responses (reasoning models, queue-backed providers).
+   */
+  upstreamTimeoutMs?: number;
+  /**
+   * Idle timeout (ms) on the upstream response body — fires if the upstream
+   * goes silent (no bytes) for this long after the response has started.
+   * Default: 30_000 (30s). Reasoning models under concurrent load can leave
+   * 30s+ gaps between streaming chunks while the model is thinking; lift this
+   * to e.g. 180_000 in those setups.
+   */
+  bodyTimeoutMs?: number;
 }
 
 export interface FalRecordConfig {

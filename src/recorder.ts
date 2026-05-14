@@ -296,6 +296,7 @@ export async function proxyAndRecord(
       res,
       req.method,
       defaults.logger,
+      { upstreamTimeoutMs: record.upstreamTimeoutMs, bodyTimeoutMs: record.bodyTimeoutMs },
     );
     upstreamStatus = result.status;
     upstreamHeaders = result.headers;
@@ -550,6 +551,11 @@ export async function proxyAndRecord(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+function clampTimeout(value: number | undefined, fallback: number): number {
+  if (value == null || !Number.isFinite(value) || value <= 0) return fallback;
+  return value;
+}
+
 function makeUpstreamRequest(
   target: URL,
   headers: Record<string, string>,
@@ -557,6 +563,7 @@ function makeUpstreamRequest(
   clientRes?: http.ServerResponse,
   method: string = "POST",
   logger?: Logger,
+  timeouts?: Pick<RecordConfig, "upstreamTimeoutMs" | "bodyTimeoutMs">,
 ): Promise<{
   status: number;
   headers: http.IncomingHttpHeaders;
@@ -567,8 +574,8 @@ function makeUpstreamRequest(
 }> {
   return new Promise((resolve, reject) => {
     const transport = target.protocol === "https:" ? https : http;
-    const UPSTREAM_TIMEOUT_MS = 30_000;
-    const BODY_TIMEOUT_MS = 30_000;
+    const UPSTREAM_TIMEOUT_MS = clampTimeout(timeouts?.upstreamTimeoutMs, 30_000);
+    const BODY_TIMEOUT_MS = clampTimeout(timeouts?.bodyTimeoutMs, 30_000);
     const req = transport.request(
       target,
       {
