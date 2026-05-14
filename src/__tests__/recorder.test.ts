@@ -4206,6 +4206,205 @@ describe("makeUpstreamRequest body timeout", () => {
     // Verify res.setTimeout was called with the 30-second body accumulation timeout
     expect(setTimeoutSpy).toHaveBeenCalledWith(30_000, expect.any(Function));
   });
+
+  it("honors custom bodyTimeoutMs value", async () => {
+    fastRawServer = http.createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: "ok", role: "assistant" }, finish_reason: "stop" }],
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => fastRawServer!.listen(0, "127.0.0.1", resolve));
+    const { port } = fastRawServer!.address() as { port: number };
+
+    setTimeoutSpy = vi.spyOn(http.IncomingMessage.prototype, "setTimeout");
+
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-record-custom-body-timeout-"));
+    const record: RecordConfig = {
+      providers: { openai: `http://127.0.0.1:${port}` },
+      fixturePath: tmpDir,
+      bodyTimeoutMs: 120_000,
+    };
+    const logger = new Logger("silent");
+    const fixtures: Fixture[] = [];
+
+    const { req, res } = createMockReqRes();
+    const chunks: Buffer[] = [];
+    Object.assign(res, {
+      writeHead: () => res,
+      end: (data?: Buffer | string) => {
+        if (data) chunks.push(typeof data === "string" ? Buffer.from(data) : data);
+        return res;
+      },
+      setHeader: () => res,
+    });
+
+    await proxyAndRecord(
+      req,
+      res,
+      { model: "gpt-4", messages: [{ role: "user", content: "hello" }] },
+      "openai",
+      "/v1/chat/completions",
+      fixtures,
+      { record, logger },
+    );
+
+    // Verify res.setTimeout was called with the custom 120s body timeout, not the default 30s
+    expect(setTimeoutSpy).toHaveBeenCalledWith(120_000, expect.any(Function));
+  });
+
+  it("honors custom upstreamTimeoutMs value", async () => {
+    // Server that accepts connections but never responds — triggers the upstream timeout
+    fastRawServer = http.createServer(() => {
+      // intentionally never respond
+    });
+    await new Promise<void>((resolve) => fastRawServer!.listen(0, "127.0.0.1", resolve));
+    const { port } = fastRawServer!.address() as { port: number };
+
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-record-custom-upstream-timeout-"));
+    const record: RecordConfig = {
+      providers: { openai: `http://127.0.0.1:${port}` },
+      fixturePath: tmpDir,
+      upstreamTimeoutMs: 100, // very short timeout to trigger quickly
+    };
+    const logger = new Logger("silent");
+    const fixtures: Fixture[] = [];
+
+    const { req, res } = createMockReqRes();
+    let writtenStatus: number | undefined;
+    let writtenBody = "";
+    Object.assign(res, {
+      writeHead: (status: number) => {
+        writtenStatus = status;
+        return res;
+      },
+      end: (data?: Buffer | string) => {
+        if (data) writtenBody = typeof data === "string" ? data : data.toString();
+        return res;
+      },
+      setHeader: () => res,
+    });
+
+    const outcome = await proxyAndRecord(
+      req,
+      res,
+      { model: "gpt-4", messages: [{ role: "user", content: "hello" }] },
+      "openai",
+      "/v1/chat/completions",
+      fixtures,
+      { record, logger },
+    );
+
+    // The custom 100ms timeout should fire and produce a 502 proxy error
+    expect(outcome).toBe("relayed");
+    expect(writtenStatus).toBe(502);
+    expect(writtenBody).toContain("timed out");
+    // The error message includes the custom timeout value (0.1s)
+    expect(writtenBody).toContain("0.1s");
+  });
+
+  it("clampTimeout falls back to default 30s for zero and negative values", async () => {
+    // Verify bodyTimeoutMs clamping via setTimeout spy (zero value)
+    fastRawServer = http.createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: "ok", role: "assistant" }, finish_reason: "stop" }],
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => fastRawServer!.listen(0, "127.0.0.1", resolve));
+    const { port } = fastRawServer!.address() as { port: number };
+
+    setTimeoutSpy = vi.spyOn(http.IncomingMessage.prototype, "setTimeout");
+
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-record-clamp-timeout-"));
+    // Pass 0 for bodyTimeoutMs — clampTimeout should reject and fall back to 30_000
+    const record: RecordConfig = {
+      providers: { openai: `http://127.0.0.1:${port}` },
+      fixturePath: tmpDir,
+      bodyTimeoutMs: 0,
+    };
+    const logger = new Logger("silent");
+    const fixtures: Fixture[] = [];
+
+    const { req, res } = createMockReqRes();
+    const chunks: Buffer[] = [];
+    Object.assign(res, {
+      writeHead: () => res,
+      end: (data?: Buffer | string) => {
+        if (data) chunks.push(typeof data === "string" ? Buffer.from(data) : data);
+        return res;
+      },
+      setHeader: () => res,
+    });
+
+    await proxyAndRecord(
+      req,
+      res,
+      { model: "gpt-4", messages: [{ role: "user", content: "hello" }] },
+      "openai",
+      "/v1/chat/completions",
+      fixtures,
+      { record, logger },
+    );
+
+    // Zero should be clamped to the default 30_000
+    expect(setTimeoutSpy).toHaveBeenCalledWith(30_000, expect.any(Function));
+
+    // Now test negative bodyTimeoutMs value
+    setTimeoutSpy.mockRestore();
+    setTimeoutSpy = vi.spyOn(http.IncomingMessage.prototype, "setTimeout");
+
+    // Close and recreate the server for the second call
+    await new Promise<void>((resolve) => fastRawServer!.close(() => resolve()));
+    fastRawServer = http.createServer((_req, res2) => {
+      res2.writeHead(200, { "Content-Type": "application/json" });
+      res2.end(
+        JSON.stringify({
+          choices: [{ message: { content: "ok", role: "assistant" }, finish_reason: "stop" }],
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => fastRawServer!.listen(0, "127.0.0.1", resolve));
+    const port2 = (fastRawServer!.address() as { port: number }).port;
+
+    const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-record-clamp-neg-"));
+    const record2: RecordConfig = {
+      providers: { openai: `http://127.0.0.1:${port2}` },
+      fixturePath: tmpDir2,
+      bodyTimeoutMs: -500,
+    };
+
+    const { req: req2, res: res2 } = createMockReqRes();
+    const chunks2: Buffer[] = [];
+    Object.assign(res2, {
+      writeHead: () => res2,
+      end: (data?: Buffer | string) => {
+        if (data) chunks2.push(typeof data === "string" ? Buffer.from(data) : data);
+        return res2;
+      },
+      setHeader: () => res2,
+    });
+
+    await proxyAndRecord(
+      req2,
+      res2,
+      { model: "gpt-4", messages: [{ role: "user", content: "hello" }] },
+      "openai",
+      "/v1/chat/completions",
+      fixtures,
+      { record: record2, logger },
+    );
+
+    // Negative values should also be clamped to 30_000
+    expect(setTimeoutSpy).toHaveBeenCalledWith(30_000, expect.any(Function));
+
+    // Clean up the extra tmpDir
+    fs.rmSync(tmpDir2, { recursive: true, force: true });
+  });
 });
 
 // ---------------------------------------------------------------------------
