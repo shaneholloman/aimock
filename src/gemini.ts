@@ -318,7 +318,25 @@ function parseToolCallPart(tc: ToolCall, logger: Logger): GeminiPart {
     logger.warn(`Malformed JSON in fixture tool call arguments for "${tc.name}": ${tc.arguments}`);
     argsObj = {};
   }
-  return { functionCall: { name: tc.name, args: argsObj } };
+  // Surface the fixture's tool_call.id on the Gemini functionCall response
+  // so clients can preserve it across the round-trip and any
+  // toolCallId-keyed follow-up fixtures match. Pairs with v1.23.1's
+  // INGEST-direction fix (#196) which preserves the id when aimock parses
+  // an incoming Gemini request — that fix only helps if the id was in the
+  // response body to begin with. Without this egress fix, aimock emits
+  // `{ functionCall: { name, args } }` (no id), so even clients that
+  // diligently preserve `functionCall.id` across the round-trip never see
+  // an id to preserve. Backward-compatible: fixtures that don't pin a
+  // tc.id continue to serialize without one (the ingest path's fallback
+  // generator handles those).
+  const functionCall: GeminiPart["functionCall"] = {
+    name: tc.name,
+    args: argsObj,
+  };
+  if (tc.id) {
+    functionCall.id = tc.id;
+  }
+  return { functionCall };
 }
 
 function buildGeminiToolCallStreamChunks(

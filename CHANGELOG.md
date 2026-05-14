@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.24.1] - 2026-05-14
+
+### Fixed
+
+- **Gemini tool-call response serializer dropped fixture-pinned `tool_call.id`** — `parseToolCallPart` emitted `{ functionCall: { name, args } }` and omitted the id even when the fixture pinned one. Pairs with v1.23.1's INGEST-direction fix ([#196](https://github.com/CopilotKit/aimock/pull/196)) which preserves `functionCall.id` when aimock parses an _incoming_ Gemini request — that fix only helps when the id is already in the response body. Without this EGRESS-direction fix, aimock never emits one for clients to preserve in the first place, so the round-trip silently breaks for any client that depends on `functionCall.id` to correlate follow-up `functionResponse` parts back to the originating call
+
 ## [1.24.0] - 2026-05-14
 
 ### Added
