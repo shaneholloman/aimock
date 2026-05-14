@@ -22,7 +22,8 @@ import {
   strictOverrideField,
 } from "./helpers.js";
 import { matchFixture } from "./router.js";
-import { proxyAndRecord } from "./recorder.js";
+import { buildFixtureMatch, persistFixture, proxyAndRecord } from "./recorder.js";
+import { resolveUpstreamUrl } from "./url.js";
 import type { Journal } from "./journal.js";
 import { audioToFalFile } from "./fal-audio.js";
 
@@ -495,26 +496,48 @@ export async function handleFal(
         }
         if (defaults.record) {
           const effectiveDefaults = withFalUpstream(defaults, route.targetHost);
-          const outcome = await proxyAndRecord(
-            req,
-            res,
-            syntheticReq,
-            "fal",
-            stripFalPrefix(pathname),
-            fixtures,
-            effectiveDefaults,
-            body,
-          );
-          if (outcome === "handled_by_hook") return "handled";
-          if (outcome !== "not_configured") {
-            journal.add({
-              method: req.method ?? "POST",
-              path: pathname,
-              headers: flattenHeaders(req.headers),
-              body: syntheticReq,
-              response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
+          // queue-submit must walk the queue upstream (submit → poll status →
+          // get result) before persisting, so the fixture stores the FINAL job
+          // body, not the IN_QUEUE envelope. sync-run is already a single
+          // request/response cycle and the generic recorder handles it.
+          if (route.kind === "queue-submit") {
+            const outcome = await proxyAndRecordFalQueueSubmit({
+              req,
+              res,
+              syntheticReq,
+              modelId,
+              pathname,
+              strippedPath: stripFalPrefix(pathname),
+              body,
+              fixtures,
+              defaults: effectiveDefaults,
+              stateKey,
+              journal,
             });
-            return "handled";
+            if (outcome === "handled") return "handled";
+            // outcome === "no_upstream" — fall through to strict/404
+          } else {
+            const outcome = await proxyAndRecord(
+              req,
+              res,
+              syntheticReq,
+              "fal",
+              stripFalPrefix(pathname),
+              fixtures,
+              effectiveDefaults,
+              body,
+            );
+            if (outcome === "handled_by_hook") return "handled";
+            if (outcome !== "not_configured") {
+              journal.add({
+                method: req.method ?? "POST",
+                path: pathname,
+                headers: flattenHeaders(req.headers),
+                body: syntheticReq,
+                response: { status: res.statusCode ?? 200, fixture: null, source: "proxy" },
+              });
+              return "handled";
+            }
           }
         }
 
@@ -649,6 +672,273 @@ function parseBody(raw: string): Record<string, unknown> | null {
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return null;
+  }
+}
+
+// ─── Queue-walk recording ──────────────────────────────────────────────
+//
+// The fal queue protocol surfaces three endpoints — submit (POST), status
+// (GET, polled), and result (GET) — but at the fixture layer we only store ONE
+// thing: the FINAL job body. A naive `proxyAndRecord` against submit would
+// persist the IN_QUEUE envelope, which is useless to replay (the SDK polls
+// status and then reads the result body, expecting `{ images: [...] }`-shaped
+// model output, not an envelope). So during recording we walk the upstream
+// queue ourselves, capture the result body, and write THAT as the fixture —
+// then synthesise the local envelope the same way the replay path does.
+
+const DEFAULT_FAL_POLL_INTERVAL_MS = 1000;
+const DEFAULT_FAL_TIMEOUT_MS = 120_000;
+
+// Hop-by-hop and client-set headers excluded from upstream forwarding.
+// Mirrors STRIP_HEADERS in recorder.ts.
+const FAL_STRIP_FORWARD_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "transfer-encoding",
+  "te",
+  "trailer",
+  "upgrade",
+  "proxy-authorization",
+  "proxy-authenticate",
+  "host",
+  "content-length",
+  "cookie",
+  "accept-encoding",
+]);
+
+export function buildFalForwardHeaders(req: http.IncomingMessage): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, val] of Object.entries(req.headers)) {
+    if (val === undefined) continue;
+    if (FAL_STRIP_FORWARD_HEADERS.has(name.toLowerCase())) continue;
+    out[name] = Array.isArray(val) ? val.join(", ") : val;
+  }
+  return out;
+}
+
+/**
+ * Walk a fal-shaped queue protocol upstream: POST submit, poll status until
+ * COMPLETED, GET final result body. Returns the parsed final body so the caller
+ * can persist it as the fixture and seed local queue state.
+ *
+ * Decoupled from the route layer so the legacy `/fal/queue/submit/{model}`
+ * audio path (`fal-audio.ts`) can reuse the same logic.
+ */
+export async function walkFalQueue(args: {
+  upstreamBase: string;
+  submitPath: string;
+  body: string;
+  headers: Record<string, string>;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+  /**
+   * Build the status-poll URL from `request_id` when upstream's submit
+   * response doesn't return a usable `status_url`. The legacy path uses
+   * aimock-internal `/fal/queue/requests/<id>/status` rather than fal.ai's
+   * `/<model>/requests/<id>/status` layout.
+   */
+  fallbackStatusPath: (requestId: string) => string;
+  fallbackResultPath: (requestId: string) => string;
+}): Promise<unknown> {
+  const {
+    upstreamBase,
+    submitPath,
+    body,
+    headers,
+    pollIntervalMs = DEFAULT_FAL_POLL_INTERVAL_MS,
+    timeoutMs = DEFAULT_FAL_TIMEOUT_MS,
+    fallbackStatusPath,
+    fallbackResultPath,
+  } = args;
+
+  const deadline = Date.now() + timeoutMs;
+
+  // ── 1. POST submit ────────────────────────────────────────────────
+  const submitUrl = resolveUpstreamUrl(upstreamBase, submitPath);
+  const submitRes = await fetch(submitUrl, { method: "POST", headers, body });
+  const submitText = await submitRes.text();
+  if (!submitRes.ok) {
+    throw new Error(`Submit ${submitRes.status}: ${submitText.slice(0, 200)}`);
+  }
+  const submitJson = parseJsonOrThrow(submitText, "Submit");
+  const env = submitJson as Record<string, unknown>;
+  const upstreamRequestId = String(env.request_id ?? "").trim();
+  if (!upstreamRequestId) {
+    throw new Error("Submit response missing request_id");
+  }
+
+  // Prefer the URLs upstream returned — a proxy in front of fal.ai may sit on
+  // a different host than the canonical `queue.fal.run` — and only fall back
+  // to constructed paths if the envelope omits them.
+  const envStatusUrl = env.status_url;
+  const envResponseUrl = env.response_url;
+  const statusUrl =
+    typeof envStatusUrl === "string" && envStatusUrl
+      ? new URL(envStatusUrl)
+      : resolveUpstreamUrl(upstreamBase, fallbackStatusPath(upstreamRequestId));
+  const resultUrl =
+    typeof envResponseUrl === "string" && envResponseUrl
+      ? new URL(envResponseUrl)
+      : resolveUpstreamUrl(upstreamBase, fallbackResultPath(upstreamRequestId));
+
+  // ── 2. Poll status until COMPLETED ───────────────────────────────
+  while (true) {
+    if (Date.now() > deadline) throw new Error(`Queue walk timed out after ${timeoutMs}ms`);
+    const statusRes = await fetch(statusUrl, { headers });
+    const statusText = await statusRes.text();
+    if (!statusRes.ok) {
+      throw new Error(`Status ${statusRes.status}: ${statusText.slice(0, 200)}`);
+    }
+    const statusJson = parseJsonOrThrow(statusText, "Status") as Record<string, unknown>;
+    const s = String(statusJson.status ?? "");
+    if (s === "COMPLETED") break;
+    if (s === "FAILED" || s === "ERROR" || s === "CANCELLED") {
+      throw new Error(`Upstream job terminated with status ${s}`);
+    }
+    const remaining = deadline - Date.now();
+    const sleep = Math.min(pollIntervalMs, Math.max(0, remaining));
+    if (sleep <= 0) throw new Error(`Queue walk timed out after ${timeoutMs}ms`);
+    await new Promise<void>((r) => setTimeout(r, sleep));
+  }
+
+  // ── 3. GET final result ──────────────────────────────────────────
+  const resultRes = await fetch(resultUrl, { headers });
+  const resultText = await resultRes.text();
+  if (!resultRes.ok) {
+    throw new Error(`Result ${resultRes.status}: ${resultText.slice(0, 200)}`);
+  }
+  return parseJsonOrThrow(resultText, "Result");
+}
+
+async function proxyAndRecordFalQueueSubmit(args: {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  syntheticReq: ChatCompletionRequest;
+  modelId: string;
+  pathname: string;
+  strippedPath: string;
+  body: string;
+  fixtures: Fixture[];
+  defaults: HandlerDefaults;
+  stateKey: (id: string) => string;
+  journal: Journal;
+}): Promise<"handled" | "no_upstream"> {
+  const {
+    req,
+    res,
+    syntheticReq,
+    modelId,
+    pathname,
+    strippedPath,
+    body,
+    fixtures,
+    defaults,
+    stateKey,
+    journal,
+  } = args;
+
+  const record = defaults.record;
+  if (!record) return "no_upstream";
+  const upstreamBase = record.providers.fal;
+  if (!upstreamBase) {
+    defaults.logger.warn(`No upstream URL configured for provider "fal" — cannot proxy`);
+    return "no_upstream";
+  }
+
+  defaults.logger.warn(`NO FIXTURE MATCH — walking fal queue at ${upstreamBase}${strippedPath}`);
+
+  let finalBody: unknown;
+  try {
+    finalBody = await walkFalQueue({
+      upstreamBase,
+      submitPath: strippedPath,
+      body,
+      headers: buildFalForwardHeaders(req),
+      pollIntervalMs: record.fal?.pollIntervalMs,
+      timeoutMs: record.fal?.timeoutMs,
+      fallbackStatusPath: (id) => `${modelId}/requests/${id}/status`,
+      fallbackResultPath: (id) => `${modelId}/requests/${id}`,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown queue-walk error";
+    defaults.logger.error(`fal queue-walk proxy failed: ${msg}`);
+    journal.add({
+      method: req.method ?? "POST",
+      path: pathname,
+      headers: flattenHeaders(req.headers),
+      body: syntheticReq,
+      response: { status: 502, fixture: null, source: "proxy" },
+    });
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: { message: `Proxy to upstream failed: ${msg}`, type: "proxy_error" },
+      }),
+    );
+    return "handled";
+  }
+
+  // ── 4. Persist fixture using the FINAL body, not the submit envelope ──
+  const matchRequest = defaults.requestTransform
+    ? defaults.requestTransform(syntheticReq)
+    : syntheticReq;
+  const fixture: Fixture = {
+    match: buildFixtureMatch(matchRequest, record),
+    response: { json: finalBody, status: 200 },
+  };
+  persistFixture({
+    record,
+    providerKey: "fal",
+    testId: getTestId(req),
+    fixture,
+    fixtures,
+    logger: defaults.logger,
+  });
+
+  // ── 5. Synthesise envelope + seed state (same shape as the replay path) ──
+  const newRequestId = crypto.randomUUID();
+  const progression = resolveProgression(defaults.falQueue);
+  const now = Date.now();
+  const initialStatus: FalQueueStatus =
+    progression.pollsBeforeCompleted === 0 ? "COMPLETED" : "IN_QUEUE";
+  const job: FalQueueJob = {
+    requestId: newRequestId,
+    modelId,
+    status: initialStatus,
+    result: finalBody,
+    pollCount: 0,
+    pollsBeforeInProgress: progression.pollsBeforeInProgress,
+    pollsBeforeCompleted: progression.pollsBeforeCompleted,
+    submittedAt: now,
+    completedAt: initialStatus === "COMPLETED" ? now : null,
+    logs: [{ timestamp: new Date(now).toISOString(), level: "INFO", message: "Job enqueued." }],
+    createdAt: now,
+  };
+  falQueueStates.set(stateKey(newRequestId), job);
+  const envelope = {
+    request_id: newRequestId,
+    response_url: `https://${FAL_HOSTS.queue}/${modelId}/requests/${newRequestId}`,
+    status_url: `https://${FAL_HOSTS.queue}/${modelId}/requests/${newRequestId}/status`,
+    cancel_url: `https://${FAL_HOSTS.queue}/${modelId}/requests/${newRequestId}/cancel`,
+    queue_position: queuePosition(job),
+  };
+  journal.add({
+    method: req.method ?? "POST",
+    path: pathname,
+    headers: flattenHeaders(req.headers),
+    body: syntheticReq,
+    response: { status: 200, fixture: null, source: "proxy" },
+  });
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(envelope));
+  return "handled";
+}
+
+function parseJsonOrThrow(text: string, label: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${label} returned non-JSON: ${text.slice(0, 200)}`);
   }
 }
 

@@ -5,36 +5,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { LLMock } from "../llmock.js";
 
-// Spin up a tiny stub upstream that responds with whatever JSON the test
-// hands it; lets us exercise the record-and-replay path without depending on
-// fal.ai itself.
-function startStubUpstream(
-  handler: (req: http.IncomingMessage, body: string) => { status?: number; body: unknown },
-): Promise<{ url: string; close: () => Promise<void> }> {
-  return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (c: Buffer) => chunks.push(c));
-      req.on("end", () => {
-        const body = Buffer.concat(chunks).toString();
-        const result = handler(req, body);
-        res.writeHead(result.status ?? 200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(result.body));
-      });
-    });
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address() as { port: number };
-      resolve({
-        url: `http://127.0.0.1:${port}`,
-        close: () =>
-          new Promise<void>((r) => {
-            server.close(() => r());
-          }),
-      });
-    });
-  });
-}
-
 describe("fal.ai general handler — fixture lookup", () => {
   let mock: LLMock;
 
@@ -231,85 +201,289 @@ describe("fal.ai general handler — fixture lookup", () => {
   });
 });
 
+// Queue-protocol-aware stub upstream. Implements the three endpoints fal's
+// queue uses: POST submit → IN_QUEUE envelope, GET .../status (polled) →
+// IN_QUEUE/IN_PROGRESS until the configured threshold is reached, then
+// COMPLETED, and GET .../<id> → the supplied final body. Tracks call counts
+// per endpoint so tests can assert what hit the wire vs. the in-memory cache.
+function startFalQueueUpstream(opts: {
+  finalBody: unknown;
+  pollsBeforeCompleted?: number;
+  upstreamRequestId?: string;
+}): Promise<{
+  url: string;
+  close: () => Promise<void>;
+  counts: { submit: number; status: number; result: number };
+}> {
+  const upstreamRequestId = opts.upstreamRequestId ?? "upstream-req-id";
+  const pollsBeforeCompleted = opts.pollsBeforeCompleted ?? 2;
+  const counts = { submit: 0, status: 0, result: 0 };
+  const statusPolls = new Map<string, number>();
+  const statusRe = /^\/(.+)\/requests\/([^/]+)\/status$/;
+  const resultRe = /^\/(.+)\/requests\/([^/]+)$/;
+
+  return new Promise((resolve) => {
+    let selfUrl = "http://stub";
+    const server = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        const url = new URL(req.url ?? "/", selfUrl);
+        const send = (status: number, body: unknown) => {
+          res.writeHead(status, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(body));
+        };
+
+        const statusMatch = url.pathname.match(statusRe);
+        const resultMatch = url.pathname.match(resultRe);
+
+        if (req.method === "GET" && statusMatch) {
+          counts.status++;
+          const reqId = statusMatch[2];
+          const n = (statusPolls.get(reqId) ?? 0) + 1;
+          statusPolls.set(reqId, n);
+          const status = n >= pollsBeforeCompleted ? "COMPLETED" : "IN_QUEUE";
+          send(200, {
+            status,
+            request_id: reqId,
+            ...(status === "IN_QUEUE" ? { queue_position: 1 } : {}),
+          });
+          return;
+        }
+        if (req.method === "GET" && resultMatch && !statusMatch) {
+          counts.result++;
+          send(200, opts.finalBody);
+          return;
+        }
+        if (req.method === "POST") {
+          counts.submit++;
+          const modelPath = url.pathname.replace(/^\/+/, "");
+          const base = `${selfUrl}/${modelPath}/requests/${upstreamRequestId}`;
+          send(200, {
+            request_id: upstreamRequestId,
+            response_url: base,
+            status_url: `${base}/status`,
+            cancel_url: `${base}/cancel`,
+            status: "IN_QUEUE",
+            queue_position: 1,
+          });
+          return;
+        }
+        send(404, { error: { message: "stub: unhandled", path: url.pathname } });
+      });
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as { port: number };
+      selfUrl = `http://127.0.0.1:${port}`;
+      resolve({
+        url: selfUrl,
+        counts,
+        close: () =>
+          new Promise<void>((r) => {
+            server.close(() => r());
+          }),
+      });
+    });
+  });
+}
+
 describe("fal.ai general handler — record and replay", () => {
   let mock: LLMock;
   let upstream: { url: string; close: () => Promise<void> } | undefined;
+  let queueUpstream:
+    | {
+        url: string;
+        close: () => Promise<void>;
+        counts: { submit: number; status: number; result: number };
+      }
+    | undefined;
   let tmpDir: string | undefined;
 
   afterEach(async () => {
     await mock?.stop();
     await upstream?.close();
+    await queueUpstream?.close();
     upstream = undefined;
+    queueUpstream = undefined;
     if (tmpDir) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
       tmpDir = undefined;
     }
   });
 
-  test("proxies unmatched fal request to upstream and saves fixture", async () => {
-    upstream = await startStubUpstream(() => ({
-      body: { images: [{ url: "https://example.com/recorded.png" }] },
-    }));
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-fal-record-"));
+  test("walks the queue upstream during recording and persists the FINAL body, not the submit envelope", async () => {
+    const FINAL_BODY = {
+      images: [{ url: "https://mock.fal.media/files/recorded-cat.png" }],
+      seed: 42,
+    };
+    queueUpstream = await startFalQueueUpstream({
+      finalBody: FINAL_BODY,
+      pollsBeforeCompleted: 2,
+      upstreamRequestId: "upstream-req-1",
+    });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-fal-queue-record-"));
 
     mock = new LLMock({
       port: 0,
-      record: { providers: { fal: upstream.url }, fixturePath: tmpDir },
+      record: {
+        providers: { fal: queueUpstream.url },
+        fixturePath: tmpDir,
+        fal: { pollIntervalMs: 5, timeoutMs: 5000 },
+      },
     });
     await mock.start();
 
-    // In record mode the proxy is transparent — what upstream says is what
-    // the client gets. Queue envelope synthesis only happens in fixture mode.
+    // Submit — client should see a synthesised envelope (aimock requestId),
+    // NOT upstream's IN_QUEUE envelope. The whole point of the fix.
+    const submit = await fetch(`${mock.url}/fal/fal-ai/flux/dev`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-fal-target-host": "queue.fal.run" },
+      body: JSON.stringify({ input: { prompt: "a cat" } }),
+    });
+    expect(submit.status).toBe(200);
+    const envelope = await submit.json();
+    expect(typeof envelope.request_id).toBe("string");
+    expect(envelope.request_id).not.toBe("upstream-req-1");
+    expect(envelope.status_url).toContain(envelope.request_id);
+
+    // Status — local job seeded with the final body, so this is COMPLETED.
+    const status = await fetch(
+      `${mock.url}/fal/fal-ai/flux/dev/requests/${envelope.request_id}/status`,
+      { headers: { "x-fal-target-host": "queue.fal.run" } },
+    );
+    expect(status.status).toBe(200);
+    expect((await status.json()).status).toBe("COMPLETED");
+
+    // Result — must be the FINAL body, not the upstream submit envelope.
+    // This is the assertion that fails before the fix: on main, the recorder
+    // persisted the IN_QUEUE envelope, so this returned `{ request_id: ..., status: "IN_QUEUE", ... }`.
+    const result = await fetch(`${mock.url}/fal/fal-ai/flux/dev/requests/${envelope.request_id}`, {
+      headers: { "x-fal-target-host": "queue.fal.run" },
+    });
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual(FINAL_BODY);
+
+    expect(queueUpstream.counts.submit).toBe(1);
+    expect(queueUpstream.counts.status).toBeGreaterThanOrEqual(2);
+    expect(queueUpstream.counts.result).toBe(1);
+
+    // Persisted fixture: response.json must be the FINAL body, not the envelope.
+    const files = fs.readdirSync(tmpDir);
+    const falFixtures = files.filter((f) => f.startsWith("fal-") && f.endsWith(".json"));
+    expect(falFixtures.length).toBe(1);
+    const recorded = JSON.parse(fs.readFileSync(path.join(tmpDir, falFixtures[0]), "utf-8"));
+    expect(recorded.fixtures[0].match.endpoint).toBe("fal");
+    expect(recorded.fixtures[0].response.json).toEqual(FINAL_BODY);
+  });
+
+  test("replays from in-memory fixture on second identical request without a second queue walk", async () => {
+    queueUpstream = await startFalQueueUpstream({
+      finalBody: { images: [{ url: "https://example.com/replay.png" }] },
+      pollsBeforeCompleted: 1,
+    });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-fal-queue-replay-"));
+
+    mock = new LLMock({
+      port: 0,
+      record: {
+        providers: { fal: queueUpstream.url },
+        fixturePath: tmpDir,
+        fal: { pollIntervalMs: 5, timeoutMs: 5000 },
+      },
+    });
+    await mock.start();
+
+    // First call: records via a full queue walk
+    const firstSubmit = await fetch(`${mock.url}/fal/fal-ai/flux/dev`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-fal-target-host": "queue.fal.run" },
+      body: JSON.stringify({ input: { prompt: "a cat" } }),
+    });
+    expect(firstSubmit.status).toBe(200);
+    expect(queueUpstream.counts.submit).toBe(1);
+
+    // Second call with the same body — should match the cached fixture, no
+    // upstream walk. Submit, status, result all served locally.
+    const beforeReplay = { ...queueUpstream.counts };
+    const replaySubmit = await fetch(`${mock.url}/fal/fal-ai/flux/dev`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-fal-target-host": "queue.fal.run" },
+      body: JSON.stringify({ input: { prompt: "a cat" } }),
+    });
+    expect(replaySubmit.status).toBe(200);
+    const replayEnvelope = await replaySubmit.json();
+    const replayResult = await fetch(
+      `${mock.url}/fal/fal-ai/flux/dev/requests/${replayEnvelope.request_id}`,
+      { headers: { "x-fal-target-host": "queue.fal.run" } },
+    );
+    expect(replayResult.status).toBe(200);
+    expect(await replayResult.json()).toEqual({
+      images: [{ url: "https://example.com/replay.png" }],
+    });
+
+    expect(queueUpstream.counts).toEqual(beforeReplay);
+  });
+
+  test("queue walk failure surfaces 502 and does not write a fixture", async () => {
+    // Upstream returns a submit envelope, but status calls 500. Recorder must
+    // give up cleanly: client sees 502, no fixture is persisted (a partial
+    // fixture would shadow real requests on the next run).
+    upstream = await new Promise((resolve) => {
+      const server = http.createServer((req, res) => {
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => {
+          const url = new URL(req.url ?? "/", "http://stub");
+          if (req.method === "POST" && !url.pathname.includes("/requests/")) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                request_id: "x",
+                status_url: `http://stub${url.pathname}/requests/x/status`,
+                response_url: `http://stub${url.pathname}/requests/x`,
+              }),
+            );
+            return;
+          }
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: { message: "upstream broke" } }));
+        });
+      });
+      server.listen(0, "127.0.0.1", () => {
+        const { port } = server.address() as { port: number };
+        resolve({
+          url: `http://127.0.0.1:${port}`,
+          close: () =>
+            new Promise<void>((r) => {
+              server.close(() => r());
+            }),
+        });
+      });
+    });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-fal-queue-fail-"));
+
+    mock = new LLMock({
+      port: 0,
+      record: {
+        providers: { fal: upstream.url },
+        fixturePath: tmpDir,
+        fal: { pollIntervalMs: 5, timeoutMs: 2000 },
+      },
+    });
+    await mock.start();
+
     const res = await fetch(`${mock.url}/fal/fal-ai/flux/dev`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-fal-target-host": "queue.fal.run" },
       body: JSON.stringify({ input: { prompt: "a cat" } }),
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(502);
     const body = await res.json();
-    expect(body).toEqual({ images: [{ url: "https://example.com/recorded.png" }] });
+    expect(body.error.type).toBe("proxy_error");
 
-    const files = fs.readdirSync(tmpDir);
+    const files = fs.existsSync(tmpDir) ? fs.readdirSync(tmpDir) : [];
     const falFixtures = files.filter((f) => f.startsWith("fal-") && f.endsWith(".json"));
-    expect(falFixtures.length).toBeGreaterThanOrEqual(1);
-
-    const recorded = JSON.parse(fs.readFileSync(path.join(tmpDir, falFixtures[0]), "utf-8"));
-    expect(recorded.fixtures[0].match.endpoint).toBe("fal");
-    expect(recorded.fixtures[0].response.json).toEqual({
-      images: [{ url: "https://example.com/recorded.png" }],
-    });
-  });
-
-  test("replays from in-memory fixture on second identical request (no second proxy)", async () => {
-    let upstreamCalls = 0;
-    upstream = await startStubUpstream(() => {
-      upstreamCalls++;
-      return { body: { images: [{ url: "https://example.com/replay.png" }] } };
-    });
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimock-fal-replay-"));
-
-    mock = new LLMock({
-      port: 0,
-      record: { providers: { fal: upstream.url }, fixturePath: tmpDir },
-    });
-    await mock.start();
-
-    // First call — hits upstream
-    await fetch(`${mock.url}/fal/fal-ai/flux/dev`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-fal-target-host": "queue.fal.run" },
-      body: JSON.stringify({ input: { prompt: "a cat" } }),
-    });
-    expect(upstreamCalls).toBe(1);
-
-    // Second call — should match recorded fixture, no upstream hit
-    const res2 = await fetch(`${mock.url}/fal/fal-ai/flux/dev`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-fal-target-host": "queue.fal.run" },
-      body: JSON.stringify({ input: { prompt: "a cat" } }),
-    });
-    expect(res2.status).toBe(200);
-    expect(upstreamCalls).toBe(1);
+    expect(falFixtures.length).toBe(0);
   });
 });
 

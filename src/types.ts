@@ -514,6 +514,20 @@ export interface RecordConfig {
    * canonical alias (e.g. "gpt-4o"). Default: false.
    */
   recordFullModelVersion?: boolean;
+  /**
+   * fal-specific recording knobs for the queue-walk recorder. During recording
+   * the queue handler POSTs submit, polls `status_url` until COMPLETED, then
+   * GETs `response_url` for the final job body — saved as the fixture. Tune
+   * the poll cadence and timeout here if upstream is unusually slow or fast.
+   */
+  fal?: FalRecordConfig;
+}
+
+export interface FalRecordConfig {
+  /** Interval between status polls upstream during recording. Default: 1000ms. */
+  pollIntervalMs?: number;
+  /** Total budget for an upstream queue walk before aborting. Default: 120000ms. */
+  timeoutMs?: number;
 }
 
 export interface MockServerOptions {
